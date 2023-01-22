@@ -67,7 +67,7 @@ func main() {
 	go func() {
 		listener, _ := net.Listen("tcp", ":9000")
 		defer listener.Close()
-		log.Println("Started TCP listening on port 9000")
+		log.Println("Started TCP service on port 9000")
 		defer wg.Done()
 		for {
 			conn, _ := listener.Accept()
@@ -114,14 +114,17 @@ func handleConnection(conn net.Conn) {
 		cmd = strings.TrimRight(cmd, "\n")
 		fields := strings.Fields(cmd)
 
-		if fields[0] == "SET" {
+		switch fields[0] {
+		case "SET":
 			key := fields[1]
 			value := fields[2]
 			ttl, err := strconv.Atoi(fields[3])
+
 			if err != nil {
 				fmt.Fprintf(conn, "Invalid ttl format: %s", err)
 				return
 			}
+
 			for _, ds := range store {
 				if ds.Key == key {
 					fmt.Fprintf(conn, "Key %s already exists\n", key)
@@ -136,7 +139,8 @@ func handleConnection(conn net.Conn) {
 			})
 
 			fmt.Fprintf(conn, "Key: %s Value: %s with TTL of %d seconds added to store \n", key, value, ttl)
-		} else if fields[0] == "GET" {
+
+		case "GET":
 			key := fields[1]
 
 			for _, ds := range store {
@@ -144,19 +148,56 @@ func handleConnection(conn net.Conn) {
 					valueBytes, err := json.Marshal(ds.Value)
 					if err != nil {
 						fmt.Fprintf(conn, "No key called %s found\n", key)
-
 						return
 					}
 
 					fmt.Fprintf(conn, " %s \n", valueBytes)
+				}
+			}
+		case "DELETE":
+			key := fields[1]
 
+			var index int
+			var found bool
+			for i, ds := range store {
+				if ds.Key == key {
+					index = i
+					found = true
+					break
 				}
 			}
 
-		} else {
+			if !found {
+				fmt.Fprintf(conn, "Key %s was not found \n", key)
+				return
+			}
+
+			store = append(store[:index], store[index+1:]...)
+
+			fmt.Fprintf(conn, "Key %s was deleted \n", key)
+		case "UPDATE":
+			key := fields[1]
+			value := fields[2]
+			// ttl, err := strconv.Atoi(fields[3])
+
+			// if err != nil {
+			// 	fmt.Fprintf(conn, "Invalid ttl format: %s", err)
+			// 	return
+			// }
+
+			if key == "" {
+				fmt.Fprintf(conn, "Key was not mentioned %s", err)
+				return
+			}
+
+			if value == "" {
+				fmt.Fprintf(conn, "Value was not mentioned %s", err)
+				return
+			}
+
+		default:
 			fmt.Fprintf(conn, "Invalid command: %s\n", cmd)
 		}
-
 	}
 }
 

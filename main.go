@@ -116,6 +116,11 @@ func handleConnection(conn net.Conn) {
 
 		switch fields[0] {
 		case "SET":
+			if len(fields) < 4 {
+				fmt.Fprintf(conn, "Invalid command. Usage: SET key value ttl\n")
+				continue
+			}
+
 			key := fields[1]
 			value := fields[2]
 			ttl, err := strconv.Atoi(fields[3])
@@ -141,20 +146,37 @@ func handleConnection(conn net.Conn) {
 			fmt.Fprintf(conn, "Key: %s Value: %s with TTL of %d seconds added to store \n", key, value, ttl)
 
 		case "GET":
+			if len(fields) < 2 {
+				fmt.Fprintf(conn, "Invalid command. Usage: GET key\n")
+				continue
+			}
+
 			key := fields[1]
 
+			found := false
 			for _, ds := range store {
 				if ds.Key == key {
 					valueBytes, err := json.Marshal(ds.Value)
 					if err != nil {
-						fmt.Fprintf(conn, "No key called %s found\n", key)
+						fmt.Fprintf(conn, "Error marshalling value: %v\n", err)
 						return
 					}
 
 					fmt.Fprintf(conn, " %s \n", valueBytes)
+					found = true
+					break
 				}
 			}
+			if !found {
+				fmt.Fprintf(conn, "No key called %s found\n", key)
+			}
+
 		case "DELETE":
+			if len(fields) < 2 {
+				fmt.Fprintf(conn, "Invalid command. Usage: DELETE key\n")
+				continue
+			}
+
 			key := fields[1]
 
 			var index int

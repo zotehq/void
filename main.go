@@ -86,18 +86,18 @@ func handleConnection(conn net.Conn) {
 
 	reader := bufio.NewReader(conn)
 
-	// fmt.Fprintf(conn, "Username: ")
-	// username, _ := reader.ReadString('\n')
-	// username = strings.TrimRight(username, "\n")
-	// fmt.Fprintf(conn, "Password: ")
-	// password, _ := reader.ReadString('\n')
-	// password = strings.TrimRight(password, "\n")
+	fmt.Fprintf(conn, "Username: ")
+	username, _ := reader.ReadString('\n')
+	username = strings.TrimRight(username, "\n")
+	fmt.Fprintf(conn, "Password: ")
+	password, _ := reader.ReadString('\n')
+	password = strings.TrimRight(password, "\n")
 
-	// if username != "tea" || password != "tea" {
-	// 	fmt.Fprintf(conn, "Invalid username or password\n")
-	// 	conn.Close()
-	// 	return
-	// }
+	if username != "tea" || password != "tea" {
+		fmt.Fprintf(conn, "Invalid username or password\n")
+		conn.Close()
+		return
+	}
 
 	for {
 		cmd, err := reader.ReadString('\n')

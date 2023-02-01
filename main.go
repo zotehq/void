@@ -198,23 +198,37 @@ func handleConnection(conn net.Conn) {
 
 			fmt.Fprintf(conn, "Key %s was deleted \n", key)
 		case "UPDATE":
+			if len(fields) < 3 {
+				fmt.Fprintf(conn, "Invalid command. Usage: UPDATE key value\n")
+				continue
+			}
+
 			key := fields[1]
 			value := fields[2]
-			// ttl, err := strconv.Atoi(fields[3])
-
-			// if err != nil {
-			// 	fmt.Fprintf(conn, "Invalid ttl format: %s", err)
-			// 	return
-			// }
 
 			if key == "" {
-				fmt.Fprintf(conn, "Key was not mentioned %s", err)
+				fmt.Fprintf(conn, "Key was not mentioned\n")
 				return
 			}
 
 			if value == "" {
-				fmt.Fprintf(conn, "Value was not mentioned %s", err)
+				fmt.Fprintf(conn, "Value was not mentioned\n")
 				return
+			}
+
+			found := false
+			for i, ds := range store {
+				if ds.Key == key {
+					store[i].Value = value
+					found = true
+					break
+				}
+			}
+
+			if found {
+				fmt.Fprintf(conn, "Key %s was updated with value %s\n", key, value)
+			} else {
+				fmt.Fprintf(conn, "Key %s was not found\n", key)
 			}
 
 		default:
@@ -389,14 +403,14 @@ func saveToDisk(store []DataStructure) {
 
 func loadFromDisk() {
 	if _, err := os.Stat("store.json"); os.IsNotExist(err) {
-		file, err := os.Create("store.json")
+		err := os.WriteFile("store.json", []byte("[]"), 0644)
 		if err != nil {
 			log.Fatalln("Error creating store.json:", err)
 		}
-		file.Close()
 	}
 
 	dataBytes, err := os.ReadFile("store.json")
+
 	log.Println("Loading data from store.json")
 	if err != nil {
 		log.Fatalln("Error reading store from disk:", err)

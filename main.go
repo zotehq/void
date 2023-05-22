@@ -28,8 +28,21 @@ type RequestBody struct {
 }
 
 var store = []DataStructure{}
+var config Config
+
+type Config struct {
+	HTTPPort   string `json:"http_port"`
+	TCPPort    string `json:"tcp_port"`
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	StorePath  string `json:"store_path"`
+	ExpireTime int    `json:"expire_time"`
+}
 
 func main() {
+	loadConfig()
+	loadFromDisk()
+
 	var wg sync.WaitGroup
 	wg.Add(3)
 
@@ -43,8 +56,6 @@ func main() {
 
 	log.Println("-- TEA DB --")
 
-	loadFromDisk()
-
 	go func() {
 		log.Println("Writing to Disk...")
 		for range ticker {
@@ -53,21 +64,21 @@ func main() {
 	}()
 
 	go func() {
-		log.Println("Started expiry service")
+		log.Printf("Started expiry service (expire time: %d seconds)\n", config.ExpireTime)
 		defer wg.Done()
 		checkExpired()
 	}()
 
 	go func() {
-		log.Println("Started HTTP service on port 8080")
+		log.Printf("Started HTTP service on port %s\n", config.HTTPPort)
 		defer wg.Done()
-		http.ListenAndServe("0.0.0.0:8080", nil)
+		http.ListenAndServe(":"+config.HTTPPort, nil)
 	}()
 
 	go func() {
-		listener, _ := net.Listen("tcp", ":9000")
+		listener, _ := net.Listen("tcp", ":"+config.TCPPort)
 		defer listener.Close()
-		log.Println("Started TCP service on port 9000")
+		log.Printf("Started TCP service on port %s\n", config.TCPPort)
 		defer wg.Done()
 		for {
 			conn, _ := listener.Accept()
@@ -93,7 +104,7 @@ func handleConnection(conn net.Conn) {
 	password, _ := reader.ReadString('\n')
 	password = strings.TrimRight(password, "\n")
 
-	if username != "tea" || password != "tea" {
+	if username != config.Username || password != config.Password {
 		fmt.Fprintf(conn, "Invalid username or password\n")
 		conn.Close()
 		return
@@ -259,32 +270,54 @@ func getKey(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Error(w, "Key not found", http.StatusNotFound)
-	} else {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
 	}
+
+	http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
 }
 
-func getAllKeys(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		dataBytes, err := json.Marshal(store)
+func createKey(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		var reqBody RequestBody
+		err := json.NewDecoder(r.Body).Decode(&reqBody)
 		if err != nil {
-			http.Error(w, "Error marshalling store", http.StatusInternalServerError)
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(dataBytes)
+		key := reqBody.Key
+		value := reqBody.Value
+		second := reqBody.Second
+
+		if key == "" {
+			http.Error(w, "Key not provided", http.StatusBadRequest)
+			return
+		}
+
+		for _, ds := range store {
+			if ds.Key == key {
+				http.Error(w, "Key already exists", http.StatusConflict)
+				return
+			}
+		}
+
+		store = append(store, DataStructure{
+			Key:   key,
+			Value: value,
+			TTL:   time.Now().Add(time.Duration(second) * time.Second),
+		})
+
+		w.WriteHeader(http.StatusCreated)
 	} else {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
 	}
 }
 
 func deleteKey(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "DELETE" {
 		key := r.URL.Query().Get("key")
-
 		if key == "" {
-			http.Error(w, "Key parameter is missing", http.StatusBadRequest)
+			http.Error(w, "Key not provided", http.StatusBadRequest)
 			return
 		}
 
@@ -299,126 +332,133 @@ func deleteKey(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if !found {
-			http.Error(w, "Key was not found", http.StatusNotFound)
+			http.Error(w, "Key not found", http.StatusNotFound)
 			return
 		}
 
 		store = append(store[:index], store[index+1:]...)
 
-		w.Write([]byte("Key was deleted successfully"))
+		w.WriteHeader(http.StatusOK)
 	} else {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
 	}
+}
 
+func getAllKeys(w http.ResponseWriter, r *http.Request) {
+	if r.Method == "GET" {
+		keys := make([]string, len(store))
+		for i, ds := range store {
+			keys[i] = ds.Key
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(keys)
+	} else {
+		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
+	}
 }
 
 func count(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "GET" {
-		count := len(store)
-		countBytes, err := json.Marshal(count)
-		if err != nil {
-			http.Error(w, "Error marshalling count", http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write(countBytes)
+		w.Header().Set("Content-Type", "text/plain")
+		fmt.Fprintf(w, "%d\n", len(store))
 	} else {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
 	}
-}
-
-func createKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "Error reading request body",
-				http.StatusInternalServerError)
-		}
-
-		var data RequestBody
-		err = json.Unmarshal(body, &data)
-
-		if err != nil {
-			http.Error(w, "Error Unmarshal req body",
-				http.StatusInternalServerError)
-		}
-
-		for _, ds := range store {
-			if ds.Key == data.Key {
-				http.Error(w, "Key already exists", http.StatusBadRequest)
-				return
-			}
-		}
-
-		store = append(store, DataStructure{
-			Key:   data.Key,
-			Value: data.Value,
-			TTL:   time.Now().Add(time.Second * time.Duration(data.Second)),
-		})
-
-		response := map[string]string{"created": "true", "key": data.Key}
-
-		dataBytes, err := json.Marshal(response)
-
-		if err != nil {
-			http.Error(w, "Error marshalling response",
-				http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-
-		w.Write(dataBytes)
-
-	} else {
-		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
-	}
-
 }
 
 func checkExpired() {
 	for {
-		time.Sleep(time.Second)
-		for i := 0; i < len(store); i++ {
-			if time.Now().After(store[i].TTL) {
-				fmt.Println("Key", store[i].Key+" has expired.")
-				store = append(store[:i], store[i+1:]...)
+		now := time.Now()
+
+		var expiredKeys []string
+
+		for _, ds := range store {
+			if ds.TTL.Before(now) {
+				expiredKeys = append(expiredKeys, ds.Key)
 			}
 		}
+
+		if len(expiredKeys) > 0 {
+			for _, key := range expiredKeys {
+				for i, ds := range store {
+					if ds.Key == key {
+						store = append(store[:i], store[i+1:]...)
+						break
+					}
+				}
+			}
+			log.Printf("Expired keys removed: %s\n", strings.Join(expiredKeys, ", "))
+		}
+
+		time.Sleep(time.Second)
 	}
 }
 
-func saveToDisk(store []DataStructure) {
-	dataBytes, err := json.Marshal(store)
-	if err != nil {
-		log.Fatalln("Error marshalling store:", err)
-		return
+func loadConfig() {
+	_, err := os.Stat("config.json")
+	if os.IsNotExist(err) {
+		createDefaultConfig()
 	}
 
-	err = os.WriteFile("store.json", dataBytes, 0644)
+	file, err := os.Open("config.json")
 	if err != nil {
-		log.Fatalln("Error writing store to disk:", err)
+		log.Fatal("Error opening config file:", err)
 	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	if err != nil {
+		log.Fatal("Error decoding config file:", err)
+	}
+}
+
+func createDefaultConfig() {
+	config = Config{
+		StorePath: "store.json",
+	}
+
+	file, err := os.Create("config.json")
+	if err != nil {
+		log.Fatal("Error creating config file:", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(config)
+	if err != nil {
+		log.Fatal("Error encoding config:", err)
+	}
+
+	log.Println("Default config file created: config.json")
 }
 
 func loadFromDisk() {
-	if _, err := os.Stat("store.json"); os.IsNotExist(err) {
-		err := os.WriteFile("store.json", []byte("[]"), 0644)
-		if err != nil {
-			log.Fatalln("Error creating store.json:", err)
-		}
-	}
-
-	dataBytes, err := os.ReadFile("store.json")
-
-	log.Println("Loading data from store.json")
+	file, err := os.Open(config.StorePath)
 	if err != nil {
-		log.Fatalln("Error reading store from disk:", err)
+		log.Println("No previous data found")
 		return
 	}
+	defer file.Close()
 
-	err = json.Unmarshal(dataBytes, &store)
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&store)
 	if err != nil {
-		log.Fatalln("Error unmarshalling store data:", err)
+		log.Fatal("Error decoding data file:", err)
+	}
+}
+
+func saveToDisk(data []DataStructure) {
+	file, err := os.Create(config.StorePath)
+	if err != nil {
+		log.Fatal("Error creating data file:", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(data)
+	if err != nil {
+		log.Fatal("Error encoding data:", err)
 	}
 }

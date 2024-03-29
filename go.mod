@@ -1,3 +1,3 @@
-module github.com/aelpxy/teadb
+module github.com/aelpxy/misuDB
 
-go 1.19
+go 1.21.8

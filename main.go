@@ -8,77 +8,50 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/aelpxy/misuDB/config"
+	"github.com/aelpxy/misuDB/structs"
+	"github.com/aelpxy/misuDB/utils"
 )
 
-type DataStructure struct {
-	Key   string
-	Value string
-	TTL   time.Time
-}
-
-type RequestBody struct {
-	Key    string `json:"key"`
-	Value  string `json:"value"`
-	Second int    `json:"second"`
-}
-
-var store = []DataStructure{}
-var config Config
-
-type Config struct {
-	HTTPPort   string `json:"http_port"`
-	TCPPort    string `json:"tcp_port"`
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	StorePath  string `json:"store_path"`
-	ExpireTime int    `json:"expire_time"`
-}
-
 func main() {
-	loadConfig()
-	loadFromDisk()
+	utils.LoadConfig()
+	utils.LoadFromDisk()
 
 	var wg sync.WaitGroup
 	wg.Add(3)
 
-	http.HandleFunc("/create", createKey)
-	http.HandleFunc("/count", count)
-	http.HandleFunc("/get", getKey)
-	http.HandleFunc("/", getAllKeys)
-	http.HandleFunc("/delete", deleteKey)
-
 	ticker := time.Tick(time.Second)
 
-	log.Println("-- TEA DB --")
+	log.Println("-- misuDB --")
 
 	go func() {
 		log.Println("Writing to Disk...")
 		for range ticker {
-			saveToDisk(store)
+			utils.SaveToDisk(config.Store)
 		}
 	}()
 
 	go func() {
-		log.Printf("Started expiry service (expire time: %d seconds)\n", config.ExpireTime)
+		log.Printf("Started expiry service (expire time: %d seconds)\n", config.Config.ExpireTime)
 		defer wg.Done()
 		checkExpired()
 	}()
 
 	go func() {
-		log.Printf("Started HTTP service on port %s\n", config.HTTPPort)
+		log.Printf("Started HTTP service on port %s\n", config.Config.HTTPPort)
 		defer wg.Done()
-		http.ListenAndServe(":"+config.HTTPPort, nil)
+		http.ListenAndServe(":"+config.Config.HTTPPort, nil)
 	}()
 
 	go func() {
-		listener, _ := net.Listen("tcp", ":"+config.TCPPort)
+		listener, _ := net.Listen("tcp", ":"+config.Config.TCPPort)
 		defer listener.Close()
-		log.Printf("Started TCP service on port %s\n", config.TCPPort)
+		log.Printf("Started TCP service on port %s\n", config.Config.TCPPort)
 		defer wg.Done()
 		for {
 			conn, _ := listener.Accept()
@@ -104,7 +77,7 @@ func handleConnection(conn net.Conn) {
 	password, _ := reader.ReadString('\n')
 	password = strings.TrimRight(password, "\n")
 
-	if username != config.Username || password != config.Password {
+	if username != config.Config.Username || password != config.Config.Password {
 		fmt.Fprintf(conn, "Invalid username or password\n")
 		conn.Close()
 		return
@@ -141,14 +114,14 @@ func handleConnection(conn net.Conn) {
 				return
 			}
 
-			for _, ds := range store {
+			for _, ds := range config.Store {
 				if ds.Key == key {
 					fmt.Fprintf(conn, "Key %s already exists\n", key)
 					return
 				}
 			}
 
-			store = append(store, DataStructure{
+			config.Store = append(config.Store, structs.DataStructure{
 				Key:   key,
 				Value: value,
 				TTL:   time.Now().Add(time.Duration(ttl) * time.Second),
@@ -165,7 +138,7 @@ func handleConnection(conn net.Conn) {
 			key := fields[1]
 
 			found := false
-			for _, ds := range store {
+			for _, ds := range config.Store {
 				if ds.Key == key {
 					valueBytes, err := json.Marshal(ds.Value)
 					if err != nil {
@@ -192,7 +165,7 @@ func handleConnection(conn net.Conn) {
 
 			var index int
 			var found bool
-			for i, ds := range store {
+			for i, ds := range config.Store {
 				if ds.Key == key {
 					index = i
 					found = true
@@ -205,7 +178,7 @@ func handleConnection(conn net.Conn) {
 				return
 			}
 
-			store = append(store[:index], store[index+1:]...)
+			config.Store = append(config.Store[:index], config.Store[index+1:]...)
 
 			fmt.Fprintf(conn, "Key %s was deleted \n", key)
 		case "UPDATE":
@@ -228,9 +201,9 @@ func handleConnection(conn net.Conn) {
 			}
 
 			found := false
-			for i, ds := range store {
+			for i, ds := range config.Store {
 				if ds.Key == key {
-					store[i].Value = value
+					config.Store[i].Value = value
 					found = true
 					break
 				}
@@ -248,132 +221,13 @@ func handleConnection(conn net.Conn) {
 	}
 }
 
-func getKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		key := r.URL.Query().Get("key")
-		if key == "" {
-			http.Error(w, "Key not provided", http.StatusBadRequest)
-			return
-		}
-
-		for _, ds := range store {
-			if ds.Key == key {
-				valueBytes, err := json.Marshal(ds.Value)
-				if err != nil {
-					http.Error(w, "Error marshalling value", http.StatusInternalServerError)
-					return
-				}
-				w.Header().Set("Content-Type", "application/json")
-				w.Write(valueBytes)
-				return
-			}
-		}
-
-		http.Error(w, "Key not found", http.StatusNotFound)
-		return
-	}
-
-	http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-}
-
-func createKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "POST" {
-		var reqBody RequestBody
-		err := json.NewDecoder(r.Body).Decode(&reqBody)
-		if err != nil {
-			http.Error(w, "Invalid request body", http.StatusBadRequest)
-			return
-		}
-
-		key := reqBody.Key
-		value := reqBody.Value
-		second := reqBody.Second
-
-		if key == "" {
-			http.Error(w, "Key not provided", http.StatusBadRequest)
-			return
-		}
-
-		for _, ds := range store {
-			if ds.Key == key {
-				http.Error(w, "Key already exists", http.StatusConflict)
-				return
-			}
-		}
-
-		store = append(store, DataStructure{
-			Key:   key,
-			Value: value,
-			TTL:   time.Now().Add(time.Duration(second) * time.Second),
-		})
-
-		w.WriteHeader(http.StatusCreated)
-	} else {
-		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-	}
-}
-
-func deleteKey(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "DELETE" {
-		key := r.URL.Query().Get("key")
-		if key == "" {
-			http.Error(w, "Key not provided", http.StatusBadRequest)
-			return
-		}
-
-		var index int
-		var found bool
-		for i, ds := range store {
-			if ds.Key == key {
-				index = i
-				found = true
-				break
-			}
-		}
-
-		if !found {
-			http.Error(w, "Key not found", http.StatusNotFound)
-			return
-		}
-
-		store = append(store[:index], store[index+1:]...)
-
-		w.WriteHeader(http.StatusOK)
-	} else {
-		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-	}
-}
-
-func getAllKeys(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		keys := make([]string, len(store))
-		for i, ds := range store {
-			keys[i] = ds.Key
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(keys)
-	} else {
-		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-	}
-}
-
-func count(w http.ResponseWriter, r *http.Request) {
-	if r.Method == "GET" {
-		w.Header().Set("Content-Type", "text/plain")
-		fmt.Fprintf(w, "%d\n", len(store))
-	} else {
-		http.Error(w, "Invalid method", http.StatusMethodNotAllowed)
-	}
-}
-
 func checkExpired() {
 	for {
 		now := time.Now()
 
 		var expiredKeys []string
 
-		for _, ds := range store {
+		for _, ds := range config.Store {
 			if ds.TTL.Before(now) {
 				expiredKeys = append(expiredKeys, ds.Key)
 			}
@@ -381,9 +235,9 @@ func checkExpired() {
 
 		if len(expiredKeys) > 0 {
 			for _, key := range expiredKeys {
-				for i, ds := range store {
+				for i, ds := range config.Store {
 					if ds.Key == key {
-						store = append(store[:i], store[i+1:]...)
+						config.Store = append(config.Store[:i], config.Store[i+1:]...)
 						break
 					}
 				}
@@ -392,73 +246,5 @@ func checkExpired() {
 		}
 
 		time.Sleep(time.Second)
-	}
-}
-
-func loadConfig() {
-	_, err := os.Stat("config.json")
-	if os.IsNotExist(err) {
-		createDefaultConfig()
-	}
-
-	file, err := os.Open("config.json")
-	if err != nil {
-		log.Fatal("Error opening config file:", err)
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&config)
-	if err != nil {
-		log.Fatal("Error decoding config file:", err)
-	}
-}
-
-func createDefaultConfig() {
-	config = Config{
-		StorePath: "store.json",
-	}
-
-	file, err := os.Create("config.json")
-	if err != nil {
-		log.Fatal("Error creating config file:", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	err = encoder.Encode(config)
-	if err != nil {
-		log.Fatal("Error encoding config:", err)
-	}
-
-	log.Println("Default config file created: config.json")
-}
-
-func loadFromDisk() {
-	file, err := os.Open(config.StorePath)
-	if err != nil {
-		log.Println("No previous data found")
-		return
-	}
-	defer file.Close()
-
-	decoder := json.NewDecoder(file)
-	err = decoder.Decode(&store)
-	if err != nil {
-		log.Fatal("Error decoding data file:", err)
-	}
-}
-
-func saveToDisk(data []DataStructure) {
-	file, err := os.Create(config.StorePath)
-	if err != nil {
-		log.Fatal("Error creating data file:", err)
-	}
-	defer file.Close()
-
-	encoder := json.NewEncoder(file)
-	err = encoder.Encode(data)
-	if err != nil {
-		log.Fatal("Error encoding data:", err)
 	}
 }

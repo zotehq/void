@@ -15,7 +15,6 @@ type RequestBody struct {
 }
 
 type Config struct {
-	HTTPPort   string `json:"http_port"`
 	TCPPort    string `json:"tcp_port"`
 	Username   string `json:"username"`
 	Password   string `json:"password"`

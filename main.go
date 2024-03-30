@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,6 +18,8 @@ import (
 )
 
 func main() {
+	log.Println("----- misuDB -----")
+
 	utils.LoadConfig()
 	utils.LoadFromDisk()
 
@@ -27,10 +28,8 @@ func main() {
 
 	ticker := time.Tick(time.Second)
 
-	log.Println("-- misuDB --")
-
 	go func() {
-		log.Println("Writing to Disk...")
+		log.Println("Writing to disk...")
 		for range ticker {
 			utils.SaveToDisk(config.Store)
 		}
@@ -43,38 +42,59 @@ func main() {
 	}()
 
 	go func() {
-		log.Printf("Started HTTP service on port %s\n", config.Config.HTTPPort)
 		defer wg.Done()
-		http.ListenAndServe(":"+config.Config.HTTPPort, nil)
-	}()
-
-	go func() {
-		listener, _ := net.Listen("tcp", ":"+config.Config.TCPPort)
-		defer listener.Close()
-		log.Printf("Started TCP service on port %s\n", config.Config.TCPPort)
-		defer wg.Done()
-		for {
-			conn, _ := listener.Accept()
-			go handleConnection(conn)
-		}
+		startTCPServer(&wg)
 	}()
 
 	wg.Wait()
 }
 
+func startTCPServer(wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	listener, err := net.Listen("tcp", ":"+config.Config.TCPPort)
+	if err != nil {
+		log.Println("Error starting TCP server:", err)
+		return
+	}
+	defer listener.Close()
+
+	log.Printf("Started TCP service on port %s\n", config.Config.TCPPort)
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			log.Println("Error accepting connection:", err)
+			continue
+		}
+
+		go handleConnection(conn)
+	}
+}
+
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	fmt.Fprintf(conn, "Connected to TeaDB \n")
+	fmt.Fprintf(conn, "Connected to misuDB \n")
 	log.Printf("Client %s connected \n", conn.RemoteAddr())
 
 	reader := bufio.NewReader(conn)
 
 	fmt.Fprintf(conn, "Username: ")
-	username, _ := reader.ReadString('\n')
+	username, err := reader.ReadString('\n')
+
+	if err != nil {
+		log.Println("Error reading username:", err)
+		return
+	}
+
 	username = strings.TrimRight(username, "\n")
-	fmt.Fprintf(conn, "Password: ")
-	password, _ := reader.ReadString('\n')
+
+	password, err := reader.ReadString('\n')
+	if err != nil {
+		log.Println("Error reading password:", err)
+		return
+	}
 	password = strings.TrimRight(password, "\n")
 
 	if username != config.Config.Username || password != config.Config.Password {

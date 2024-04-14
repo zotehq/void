@@ -12,13 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/aelpxy/misuDB/config"
-	"github.com/aelpxy/misuDB/structs"
-	"github.com/aelpxy/misuDB/utils"
+	"github.com/krytonitehq/void/config"
+	"github.com/krytonitehq/void/structs"
+	"github.com/krytonitehq/void/utils"
 )
 
 func main() {
-	log.Println("----- misuDB -----")
+	log.Println("----- Void -----")
 
 	utils.LoadConfig()
 	utils.LoadFromDisk()
@@ -75,7 +75,7 @@ func startTCPServer(wg *sync.WaitGroup) {
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	fmt.Fprintf(conn, "Connected to misuDB \n")
+	fmt.Fprintf(conn, "Connected to Void \n")
 	log.Printf("Client %s connected \n", conn.RemoteAddr())
 
 	reader := bufio.NewReader(conn)

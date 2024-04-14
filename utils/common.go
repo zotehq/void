@@ -5,8 +5,8 @@ import (
 	"log"
 	"os"
 
-	"github.com/aelpxy/misuDB/config"
-	"github.com/aelpxy/misuDB/structs"
+	"github.com/krytonitehq/void/config"
+	"github.com/krytonitehq/void/structs"
 )
 
 func LoadConfig() {

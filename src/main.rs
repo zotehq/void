@@ -1,3 +1,11 @@
+pub mod config;
+
+use config::Config;
+
 fn main() {
-  println!("Hello, world!");
+  let conf = Config::from("config.toml").unwrap();
+  println!(
+    "address = {}\nport = {}\nusername = {}\npassword = {}",
+    conf.address, conf.port, conf.username, conf.password
+  );
 }

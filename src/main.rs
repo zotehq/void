@@ -1,3 +1,4 @@
+pub mod argparser;
 pub mod config;
 pub mod datetime;
 pub mod logger;

@@ -21,20 +21,17 @@ impl<'a> Response<'a> {
     }
   }
 
-  pub fn to_bytes(self) -> Vec<u8> {
-    let mut bytes: Vec<u8> = vec![self.error.into()];
+  pub fn to_bytes(&self) -> Vec<u8> {
+    let mut bytes: Vec<u8> = vec![self.error as u8];
 
-    match self.msg {
-      Some(msg) => {
-        bytes.extend(msg.as_bytes());
-        bytes.push(0);
-      }
-      None => bytes.push(0),
+    if let Some(msg) = self.msg {
+      bytes.extend(msg.as_bytes());
     }
 
-    match self.data {
-      Some(data) => bytes.extend(data),
-      None => bytes.push(0),
+    bytes.push(0);
+
+    if let Some(data) = self.data {
+      bytes.extend(data);
     }
 
     bytes

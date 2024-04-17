@@ -1,17 +1,13 @@
 use crate::logger;
-use may::{io::SplitIo, net::TcpStream};
-use std::io::{BufReader, BufWriter, Read, Result, Write};
+use may::net::TcpStream;
+use std::io::{Read, Result, Write};
 
 // to-do: fix reads, it reads 0 bytes
-pub fn handle_connection(stream: TcpStream) -> Result<()> {
-  let split = stream.split()?;
-  let mut reader = BufReader::new(split.0);
-  let mut writer = BufWriter::new(split.1);
-
+pub fn handle_connection(mut stream: TcpStream) -> Result<()> {
   loop {
     let mut buf: Vec<u8> = vec![0; 1024];
 
-    let bytes_read = match reader.read(&mut buf) {
+    let bytes_read = match stream.read(&mut buf) {
       Ok(0) => {
         logger::info("Connection closed");
         return Ok(());
@@ -24,7 +20,7 @@ pub fn handle_connection(stream: TcpStream) -> Result<()> {
       }
     };
 
-    match writer.write_all(&buf[..bytes_read]) {
+    match stream.write_all(&buf[..bytes_read]) {
       Ok(_) => {
         continue;
       }

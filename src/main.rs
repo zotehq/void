@@ -8,11 +8,14 @@ pub mod response;
 pub mod server;
 
 use config::Config;
-use server::Server;
-use std::error::Error;
+use server::SERVER;
+use std::{error::Error, sync::atomic::Ordering::Relaxed};
 
 fn main() -> Result<(), Box<dyn Error>> {
   let conf = Config::from_file("config.toml")?;
-  Server::new(&conf.address, &conf.port, conf.max_conns)?.listen();
+
+  SERVER.max_conns.store(conf.max_conns, Relaxed);
+  server::listen(&conf.address, conf.port)?;
+
   Ok(())
 }

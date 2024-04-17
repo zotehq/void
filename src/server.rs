@@ -1,48 +1,67 @@
 use crate::{conn_handler::handle_connection, logger, response::Response};
-use std::{error::Error, io::Write, net::TcpListener, thread};
+use may::{coroutine::scope, go, net::TcpListener};
+use std::{
+  io::Write,
+  sync::{
+    atomic::{
+      AtomicUsize,
+      Ordering::{AcqRel, Acquire, Relaxed},
+    },
+    OnceLock,
+  },
+};
 
+#[derive(Default)]
 pub struct Server {
-  listener: TcpListener,
-  max_conns: usize,
-  current_conns: usize,
+  pub addr: OnceLock<String>,
+  pub max_conns: AtomicUsize,
+  pub current_conns: AtomicUsize,
 }
 
-impl Server {
-  pub fn new(host: &str, port: &u16, max_conns: usize) -> Result<Server, Box<dyn Error>> {
-    logger::info(&format!("Binding to {}:{}", host, port));
+pub static SERVER: Server = Server {
+  addr: OnceLock::new(),
+  max_conns: AtomicUsize::new(0),
+  current_conns: AtomicUsize::new(0),
+};
 
-    Ok(Server {
-      listener: TcpListener::bind(format!("{}:{}", host, port))?,
-      max_conns,
-      current_conns: 0,
-    })
-  }
+pub fn listen(host: &str, port: u16) -> std::io::Result<()> {
+  let addr = SERVER.addr.get_or_init(|| format!("{host}:{port}"));
 
-  pub fn listen(mut self) {
-    logger::info("Listening for connections");
+  logger::info(&("Listening for connections on ".to_owned() + &addr));
 
-    for stream in self.listener.incoming() {
-      let mut stream = match stream {
-        Err(error) => {
-          logger::info(&format!("Connection failed: {}", error.to_string()));
-          continue;
+  let threads = num_cpus::get();
+  may::config().set_workers(threads);
+
+  scope(|s| {
+    for _ in 0..threads {
+      go!(s, move || {
+        let listener = TcpListener::bind(addr).expect("bad address");
+        for stream in listener.incoming() {
+          let mut stream = match stream {
+            Err(error) => {
+              logger::info(&format!("Connection failed: {}", error.to_string()));
+              continue;
+            }
+            Ok(stream) => stream,
+          };
+
+          if SERVER.current_conns.load(Relaxed) >= SERVER.max_conns.load(Acquire) {
+            logger::warn("Connection dropped due to max connections limit");
+            let _ = stream.write_all(&Response::error("Too many connections").to_bytes());
+            continue;
+          }
+
+          SERVER.current_conns.fetch_add(1, AcqRel);
+          go!(move || {
+            let _ = handle_connection(stream);
+            SERVER.current_conns.fetch_sub(1, AcqRel);
+          });
+
+          logger::info("Connection accepted");
         }
-        Ok(stream) => stream,
-      };
-
-      if self.current_conns >= self.max_conns {
-        logger::warn("Connection dropped due to max connections limit");
-        let _ = stream.write_all(&Response::error("Too many connections").to_bytes());
-        continue;
-      }
-
-      self.current_conns += 1;
-      thread::spawn(move || {
-        handle_connection(stream);
-        self.current_conns -= 1;
       });
-
-      logger::info("Connection accepted");
     }
-  }
+  });
+
+  Ok(())
 }

@@ -1,22 +1,25 @@
-pub struct Response<'a> {
+pub struct Response {
   error: bool,
-  msg: Option<&'a str>,
-  data: Option<&'a [u8]>,
+  msg: Option<String>,
+  data: Option<Vec<u8>>,
 }
 
-impl<'a> Response<'a> {
-  pub fn error(msg: &'a str) -> Self {
+impl Response {
+  pub fn error(msg: &str) -> Self {
     Self {
       error: true,
-      msg: Some(msg),
+      msg: Some(msg.to_string()),
       data: None,
     }
   }
 
-  pub fn ok(msg: Option<&'a str>, data: Option<&'a [u8]>) -> Self {
+  pub fn ok(msg: Option<&str>, data: Option<Vec<u8>>) -> Self {
     Self {
       error: false,
-      msg,
+      msg: match msg {
+        None => None,
+        Some(v) => Some(v.to_string()),
+      },
       data,
     }
   }
@@ -24,14 +27,16 @@ impl<'a> Response<'a> {
   pub fn to_bytes(&self) -> Vec<u8> {
     let mut bytes: Vec<u8> = vec![self.error as u8];
 
-    if let Some(msg) = self.msg {
-      bytes.extend(msg.as_bytes());
+    match &self.msg {
+      None => (),
+      Some(v) => bytes.extend(v.as_bytes()),
     }
 
     bytes.push(0);
 
-    if let Some(data) = self.data {
-      bytes.extend(data);
+    match &self.data {
+      None => (),
+      Some(v) => bytes.extend(v),
     }
 
     bytes

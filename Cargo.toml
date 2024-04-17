@@ -4,8 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-may = "0.3.45"
-num_cpus = "1.16.0"
 serde = { version = "1.0.197", default-features = false, features = ["derive"] }
 toml = "0.8.12"
 

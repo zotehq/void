@@ -1,7 +1,3 @@
-#[macro_use]
-pub extern crate may;
-pub extern crate num_cpus;
-
 pub mod arg_parser;
 pub mod config;
 pub mod conn_handler;
@@ -17,6 +13,6 @@ use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {
   let conf = Config::from_file("config.toml")?;
-  Server::new(&conf.address, &conf.port, conf.max_conns).listen();
+  Server::new(&conf.address, &conf.port, conf.max_conns)?.listen();
   Ok(())
 }

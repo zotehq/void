@@ -2,7 +2,6 @@ use crate::logger;
 use may::net::TcpStream;
 use std::io::{Read, Result, Write};
 
-// to-do: fix reads, it reads 0 bytes
 pub fn handle_connection(mut stream: TcpStream) -> Result<()> {
   loop {
     let mut buf: Vec<u8> = vec![0; 1024];

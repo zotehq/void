@@ -9,13 +9,17 @@ pub mod server;
 
 use config::Config;
 use server::SERVER;
-use std::{error::Error, sync::atomic::Ordering::Relaxed};
+use std::sync::atomic::Ordering::Relaxed;
 
-fn main() -> Result<(), Box<dyn Error>> {
-  let conf = Config::from_file("config.toml")?;
+fn main() {
+  let conf = match Config::from_file("config.toml") {
+    Ok(c) => c,
+    Err(e) => {
+      logger::fatal(&format!("Failed to load config: {}", e.to_string()));
+      return;
+    }
+  };
 
   SERVER.max_conns.store(conf.max_conns, Relaxed);
-  server::listen(&conf.address, conf.port)?;
-
-  Ok(())
+  server::listen(&conf.address, conf.port);
 }

@@ -24,10 +24,10 @@ pub static SERVER: Server = Server {
   current_conns: AtomicUsize::new(0),
 };
 
-pub fn listen(host: &str, port: u16) -> std::io::Result<()> {
+pub fn listen(host: &str, port: u16) {
   let addr = SERVER.addr.get_or_init(|| format!("{host}:{port}"));
 
-  logger::info(&("Listening for connections on ".to_owned() + &addr));
+  logger::info(&("Binding to ".to_owned() + &addr));
 
   let threads = num_cpus::get();
   may::config().set_workers(threads);
@@ -35,7 +35,14 @@ pub fn listen(host: &str, port: u16) -> std::io::Result<()> {
   scope(|s| {
     for _ in 0..threads {
       go!(s, move || {
-        let listener = TcpListener::bind(addr).expect("bad address");
+        let listener = match TcpListener::bind(addr) {
+          Ok(l) => l,
+          Err(e) => {
+            logger::fatal(&format!("Failed to bind: {}", e.to_string()));
+            return;
+          }
+        };
+
         for stream in listener.incoming() {
           let mut stream = match stream {
             Err(error) => {
@@ -61,7 +68,7 @@ pub fn listen(host: &str, port: u16) -> std::io::Result<()> {
         }
       });
     }
-  });
 
-  Ok(())
+    logger::info("Listening for connections");
+  });
 }

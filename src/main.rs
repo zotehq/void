@@ -1,3 +1,7 @@
+#[macro_use]
+pub extern crate may;
+pub extern crate num_cpus;
+
 pub mod arg_parser;
 pub mod config;
 pub mod conn_handler;

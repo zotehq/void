@@ -7,11 +7,10 @@ pub struct ArgParser {
 impl ArgParser {
   pub fn new() -> Result<Self, Box<dyn Error>> {
     let mut args = std::env::args();
-    args.next(); // skip the first argument in the iterator which is ALWAYS the path to the binary
 
     let mut verbose = false;
 
-    for arg in args {
+    for arg in args.skip(1) {
       if arg == "--verbose" {
         if verbose {
           return Err("--verbose was used more than once".into());

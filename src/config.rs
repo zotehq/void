@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{error::Error, fs::read_to_string};
 use toml;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Default)]
 pub struct Config {
   pub address: String,
   pub port: u16,

@@ -54,8 +54,7 @@ pub fn listen(host: &str, port: u16) {
 
 					if SERVER.current_conns.load(Relaxed) >= SERVER.max_conns.load(Acquire) {
 						logger::warn("Connection dropped due to max connections limit");
-						let _ =
-							stream.write_all(&Response::error("Too many connections").to_bytes());
+						let _ = stream.write_all(&Response::error("Too many connections").to_bytes());
 						continue;
 					}
 

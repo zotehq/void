@@ -12,14 +12,14 @@ use server::SERVER;
 use std::sync::atomic::Ordering::Relaxed;
 
 fn main() {
-	let conf = match Config::from_file("config.toml") {
-		Ok(c) => c,
-		Err(e) => {
-			logger::fatal(&format!("Failed to load config: {}", e.to_string()));
-			return;
-		}
-	};
+  let conf = match Config::from_file("config.toml") {
+    Ok(c) => c,
+    Err(e) => {
+      logger::fatal(&format!("Failed to load config: {}", e.to_string()));
+      return;
+    }
+  };
 
-	SERVER.max_conns.store(conf.max_conns, Relaxed);
-	server::listen(&conf.address, conf.port);
+  SERVER.max_conns.store(conf.max_conns, Relaxed);
+  server::listen(&conf.address, conf.port);
 }

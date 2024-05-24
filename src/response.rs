@@ -9,11 +9,35 @@ pub struct Response {
 }
 
 impl Response {
+  pub fn success(message: &str) -> Self {
+    Self {
+      error: false,
+      message: Some(message.to_string()),
+      payload: None,
+    }
+  }
+
+  pub fn success_payload(message: &str, payload: String) -> Self {
+    Self {
+      error: false,
+      message: Some(message.to_string()),
+      payload: Some(payload),
+    }
+  }
+
   pub fn error(message: &str) -> Self {
     Self {
       error: true,
       message: Some(message.to_string()),
       payload: None,
+    }
+  }
+
+  pub fn error_payload(message: &str, payload: String) -> Self {
+    Self {
+      error: true,
+      message: Some(message.to_string()),
+      payload: Some(payload),
     }
   }
 

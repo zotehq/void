@@ -1,5 +1,5 @@
 use crate::logger;
-use crate::server::{log_conns, SERVER};
+use crate::server::{log_conns_minus_one, SERVER};
 use may::net::TcpStream;
 use std::io::{Read, Write};
 use std::sync::atomic::Ordering::Relaxed;
@@ -10,7 +10,7 @@ pub fn handle_connection(mut stream: TcpStream) {
 
     let bytes_read = match stream.read(&mut buffer) {
       Ok(0) => {
-        logger::info(&log_conns("Connection closed", true));
+        logger::info(&log_conns_minus_one("Connection closed"));
         return;
       }
       Ok(n) => n,

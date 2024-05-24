@@ -26,9 +26,19 @@ pub static SERVER: Server = Server {
   max_body_size: AtomicUsize::new(0),
 };
 
-pub fn log_conns(msg: &str, remove_one: bool) -> String {
-  // remove_one is needed for disconnection
-  let current_conns = SERVER.current_conns.load(Acquire) - if remove_one { 1 } else { 0 };
+pub fn log_conns(msg: &str) -> String {
+  let current_conns = SERVER.current_conns.load(Acquire);
+  let max_conns = SERVER.max_conns.load(Relaxed);
+  format!(
+    "{msg} ({current_conns} {} / {max_conns} max)",
+    if current_conns == 1 { "conn" } else { "conns" }
+  )
+}
+
+pub fn log_conns_minus_one(msg: &str) -> String {
+  // we need this when a client disconnects because the disconnection
+  // wont take effect in the current_conns immediately
+  let current_conns = SERVER.current_conns.load(Acquire) - 1;
   let max_conns = SERVER.max_conns.load(Relaxed);
   format!(
     "{msg} ({current_conns} {} / {max_conns} max)",
@@ -65,7 +75,7 @@ pub fn listen(host: &str, port: u16) {
           };
 
           if SERVER.current_conns.load(Relaxed) >= SERVER.max_conns.load(Acquire) {
-            logger::warn(&log_conns("Too many connections", false));
+            logger::warn(&log_conns("Too many connections"));
             let _ = stream.write_all(&Response::error("Too many connections").to_bytes());
             continue;
           }
@@ -76,7 +86,7 @@ pub fn listen(host: &str, port: u16) {
             SERVER.current_conns.fetch_sub(1, AcqRel);
           });
 
-          logger::info(&log_conns("Connection established", false));
+          logger::info(&log_conns("Connection established"));
         }
       });
     }

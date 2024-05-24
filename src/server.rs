@@ -76,7 +76,12 @@ pub fn listen(host: &str, port: u16) {
 
           if SERVER.current_conns.load(Relaxed) >= SERVER.max_conns.load(Acquire) {
             logger::warn(&log_conns("Too many connections"));
-            let _ = stream.write_all(&Response::error("Too many connections").to_bytes());
+            let _ = stream.write_all(
+              &Response::error("Too many connections")
+                .to_json()
+                .unwrap()
+                .as_bytes(),
+            ); // unwrap is bad, but i am absolutely SURE no error in serialization can happen
             continue;
           }
 

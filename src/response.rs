@@ -1,44 +1,23 @@
+use serde::Serialize;
+use std::error::Error;
+
+#[derive(Serialize)]
 pub struct Response {
   error: bool,
-  msg: Option<String>,
-  data: Option<Vec<u8>>,
+  message: Option<String>,
+  payload: Option<String>,
 }
 
 impl Response {
-  pub fn error(msg: &str) -> Self {
+  pub fn error(message: &str) -> Self {
     Self {
       error: true,
-      msg: Some(msg.to_string()),
-      data: None,
+      message: Some(message.to_string()),
+      payload: None,
     }
   }
 
-  pub fn ok(msg: Option<&str>, data: Option<Vec<u8>>) -> Self {
-    Self {
-      error: false,
-      msg: match msg {
-        None => None,
-        Some(v) => Some(v.to_string()),
-      },
-      data,
-    }
-  }
-
-  pub fn to_bytes(&self) -> Vec<u8> {
-    let mut bytes: Vec<u8> = vec![self.error as u8];
-
-    match &self.msg {
-      None => (),
-      Some(v) => bytes.extend(v.as_bytes()),
-    }
-
-    bytes.push(0);
-
-    match &self.data {
-      None => (),
-      Some(v) => bytes.extend(v),
-    }
-
-    bytes
+  pub fn to_json(&self) -> Result<String, Box<dyn Error>> {
+    Ok(serde_json::to_string(self)?)
   }
 }

@@ -9,6 +9,7 @@ pub struct Config {
   pub username: String,
   pub password: String,
   pub max_conns: usize,
+  pub max_body_size: usize,
 }
 
 impl Config {

@@ -21,5 +21,6 @@ fn main() {
   };
 
   SERVER.max_conns.store(conf.max_conns, Relaxed);
+  SERVER.max_body_size.store(conf.max_body_size, Relaxed);
   server::listen(&conf.address, conf.port);
 }

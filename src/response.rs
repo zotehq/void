@@ -5,7 +5,16 @@ use std::error::Error;
 pub struct Response {
   error: bool,
   message: Option<String>,
-  payload: Option<String>,
+  payload: Option<ResponsePayload>,
+}
+
+#[derive(Serialize)]
+pub struct ResponsePayload {
+  key: String,
+  value: String,
+  #[serde(rename = "type")]
+  ktype: String,
+  expires_in: Option<i32>,
 }
 
 impl Response {
@@ -17,7 +26,7 @@ impl Response {
     }
   }
 
-  pub fn success_payload(message: &str, payload: String) -> Self {
+  pub fn success_payload(message: &str, payload: ResponsePayload) -> Self {
     Self {
       error: false,
       message: Some(message.to_string()),
@@ -33,7 +42,7 @@ impl Response {
     }
   }
 
-  pub fn error_payload(message: &str, payload: String) -> Self {
+  pub fn error_payload(message: &str, payload: ResponsePayload) -> Self {
     Self {
       error: true,
       message: Some(message.to_string()),

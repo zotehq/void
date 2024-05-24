@@ -1,3 +1,4 @@
+use crate::primitive_value::PrimitiveValue;
 use serde::Serialize;
 use std::error::Error;
 
@@ -11,9 +12,7 @@ pub struct Response {
 #[derive(Serialize)]
 pub struct ResponsePayload {
   key: String,
-  value: String,
-  #[serde(rename = "type")]
-  ktype: String,
+  value: PrimitiveValue,
   expires_in: Option<i32>,
 }
 

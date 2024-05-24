@@ -12,18 +12,20 @@ Void is written in Rust with safety in mind while focusing on being fault tolera
 
 ## Protocol Specification
 
-The client initiates a connection by establishing a TCP connection with the server.
-
-Upon successful connection, both the client and server can start exchanging data.
+The client initiates a connection by establishing a TCP connection with the server and then authenticating.  
+Upon successful connection, both the client and server can start exchanging data.  
+We use JSON for request/response to make it an easier developer experience.
 
 ### Responses
 
-Responses follow the following structure: `[error_byte, msg_bytes, data]`.
-
-- `error_byte` can be 0 or 1. If it's 0, there is no error; if it's 1, there is an error.
-
-- `msg_bytes` can be 0 or a value greater than 0. If it's 0, there is no message; otherwise, there is a message. In the case of a message, it is sent in ASCII format and terminates with a null byte (0).
-
-- `data` can be 0 or any other value. If it's 0, there is no additional data; otherwise, there is one or more bytes of data.
+All responses follow this structure: `{"error": boolean, "message": string, "payload": null | value}`  
+Payload is set to a value when getting a key and the key actually exists  
+Error is set to true when there's an error (duh!)
 
 ### Requests
+
+All requests follow this structure: `{"action": string, "key": string | null, "value": any | null}`  
+`action` can be either `GET`, `SET`, or `DELETE`  
+When `action` is `GET`, a `key` is expected, the value will be ignored even if set  
+When `action` is `SET`, a `key` and `value` is expected where value can be any supported JSON value other than `null`  
+When `action` is `DELETE`, it's the same as `GET`

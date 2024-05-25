@@ -1,5 +1,4 @@
-use std::env;
-use std::error::Error;
+use std::{env, error::Error};
 
 pub struct ArgParser {
   pub verbose: bool,

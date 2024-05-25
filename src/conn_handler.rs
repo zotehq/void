@@ -1,9 +1,10 @@
-use crate::logger;
-use crate::request::Request;
-use crate::server::{log_conns_minus_one, SERVER};
+use crate::{
+  logger,
+  request::Request,
+  server::{log_conns_minus_one, SERVER},
+};
 use may::net::TcpStream;
-use std::io::Read;
-use std::sync::atomic::Ordering::Relaxed;
+use std::{io::Read, sync::atomic::Ordering::Relaxed};
 
 pub fn handle_connection(mut stream: TcpStream) {
   loop {

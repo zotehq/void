@@ -1,148 +1,35 @@
-use crate::{config, datetime::DateTime};
-use std::process::exit;
+pub use log::{debug, error, info, log, trace, warn, Level};
 
-// ugliest loglevel implementation in the world
-
-struct LogLevel {
-  trace: bool,
-  debug: bool,
-  info: bool,
-  warn: bool,
-  error: bool,
-}
-
-impl LogLevel {
-  pub fn load() -> Self {
-    match config::read()
-      .log_level
-      .unwrap_or("INFO".to_string())
-      .as_str()
-    {
-      "TRACE" => Self {
-        trace: true,
-        debug: true,
-        info: true,
-        warn: true,
-        error: true,
-      },
-      "DEBUG" => Self {
-        trace: false,
-        debug: true,
-        info: true,
-        warn: true,
-        error: true,
-      },
-      "INFO" => Self {
-        trace: false,
-        debug: false,
-        info: true,
-        warn: true,
-        error: true,
-      },
-      "WARN" => Self {
-        trace: false,
-        debug: false,
-        info: false,
-        warn: true,
-        error: true,
-      },
-      "ERROR" => Self {
-        trace: false,
-        debug: false,
-        info: false,
-        warn: false,
-        error: true,
-      },
-      "FATAL" => Self {
-        trace: false,
-        debug: false,
-        info: false,
-        warn: false,
-        error: false,
-      },
-      _ => Self {
-        trace: false,
-        debug: false,
-        info: true,
-        warn: true,
-        error: true,
-      },
+pub fn init() {
+  let conf = config::get();
+  if std::env::var("RUST_LOG").is_err() {
+    if let Some(ref log_level) = conf.log_level {
+      std::env::set_var("RUST_LOG", log_level.as_str());
+    } else {
+      std::env::set_var("RUST_LOG", "info");
     }
   }
+
+  env_logger::init();
 }
 
-pub fn trace(msg: &str, caller: &str) {
-  if !LogLevel::load().trace {
-    return;
-  }
+// based on log crate error! impl
+#[macro_export]
+macro_rules! fatal {
+    // fatal!(target: "my_target", key1 = 42, key2 = true; "a {} event", "log")
+    // fatal!(target: "my_target", "a {} event", "log")
+    (target: $target:expr, $($arg:tt)+) => (
+        log::log!(target: $target, log::Level::Error, $($arg)+);
+        std::process::exit(1);
+    );
 
-  let datetime = DateTime::new();
-
-  println!(
-    "[\x1b[1;37m{} {}\x1b[0m] [\x1b[1;30mTRACE\x1b[0m from \x1b[1;37m{}\x1b[0m]: {}",
-    datetime.date, datetime.time, caller, msg
-  );
+    // fatal!("a {} event", "log")
+    ($($arg:tt)+) => (
+        log::log!(log::Level::Error, $($arg)+);
+        std::process::exit(1);
+    )
 }
 
-pub fn debug(msg: &str) {
-  if !LogLevel::load().debug {
-    return;
-  }
+pub use fatal;
 
-  let datetime = DateTime::new();
-
-  println!(
-    "[\x1b[1;37m{} {}\x1b[0m] [\x1b[1;30mDEBUG\x1b[0m]: {}",
-    datetime.date, datetime.time, msg
-  );
-}
-
-pub fn info(msg: &str) {
-  if !LogLevel::load().info {
-    return;
-  }
-
-  let datetime = DateTime::new();
-
-  println!(
-    "[\x1b[1;37m{} {}\x1b[0m] [\x1b[34mINFO\x1b[0m]: {}",
-    datetime.date, datetime.time, msg
-  );
-}
-
-pub fn warn(msg: &str) {
-  if !LogLevel::load().warn {
-    return;
-  }
-
-  let datetime = DateTime::new();
-
-  eprintln!(
-    "[\x1b[1;37m{} {}\x1b[0m] [\x1b[1;33mWARN\x1b[0m]: {}",
-    datetime.date, datetime.time, msg
-  );
-}
-
-pub fn error(msg: &str) {
-  if !LogLevel::load().error {
-    return;
-  }
-
-  let datetime = DateTime::new();
-
-  eprintln!(
-    "[\x1b[1;37m{} {}\x1b[0m] [\x1b[31mERROR\x1b[0m]: {}",
-    datetime.date, datetime.time, msg
-  );
-}
-
-pub fn fatal(msg: &str) {
-  let datetime = DateTime::new();
-
-  eprintln!(
-    "[\x1b[1;37m{} {}\x1b[0m] [\x1b[1;31mFATAL\x1b[0m]: {}",
-    datetime.date, datetime.time, msg
-  );
-
-  exit(1);
-}
+use crate::config;

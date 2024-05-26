@@ -17,8 +17,9 @@ pub struct RequestPayload {
   pub password: Option<String>,
 }
 
-impl Request {
-  pub fn from_str(s: &str) -> Result<Request, Box<dyn Error>> {
+impl std::str::FromStr for Request {
+  type Err = Box<dyn Error>;
+  fn from_str(s: &str) -> Result<Request, Self::Err> {
     Ok(serde_json::from_str::<Request>(s)?)
   }
 }

@@ -12,7 +12,7 @@ pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
 
 pub fn log_conns(msg: &str) -> String {
   let current_conns = CURRENT_CONNS.load(Relaxed);
-  let max_conns = config::read().max_conns;
+  let max_conns = config::get().max_conns;
 
   format!(
     "{msg} ({current_conns} {} / {max_conns} max)",
@@ -24,7 +24,7 @@ pub fn log_conns_minus_one(msg: &str) -> String {
   // we need this when a client disconnects because the disconnection
   // wont take effect in the current_conns immediately
   let current_conns = CURRENT_CONNS.load(Relaxed);
-  let max_conns = config::read().max_conns;
+  let max_conns = config::get().max_conns;
 
   format!(
     "{msg} ({current_conns} {} / {max_conns} max)",
@@ -33,10 +33,10 @@ pub fn log_conns_minus_one(msg: &str) -> String {
 }
 
 pub fn listen() {
-  let conf = config::read();
+  let conf = config::get();
   let addr = &format!("{}:{}", conf.address, conf.port);
 
-  logger::info(&("Binding to ".to_string() + &addr));
+  logger::info!("Binding to {}", &addr);
 
   let threads = num_cpus::get();
   may::config().set_workers(threads);
@@ -47,28 +47,22 @@ pub fn listen() {
         let listener = match TcpListener::bind(addr.clone()) {
           Ok(l) => l,
           Err(e) => {
-            logger::fatal(&format!("Failed to bind: {}", e.to_string()));
-            return;
+            logger::fatal!("Failed to bind: {}", e.to_string());
           }
         };
 
         for stream in listener.incoming() {
           let mut stream = match stream {
-            Err(error) => {
-              logger::error(&format!("Connection failed: {}", error.to_string()));
+            Err(e) => {
+              logger::error!("Connection failed: {}", e.to_string());
               continue;
             }
-            Ok(stream) => stream,
+            Ok(s) => s,
           };
 
           if CURRENT_CONNS.load(Relaxed) >= conf.max_conns {
-            logger::warn(&log_conns("Too many connections"));
-            let _ = stream.write_all(
-              &Response::error("Too many connections")
-                .to_json()
-                .unwrap()
-                .as_bytes(),
-            ); // unwrap is bad, but i am absolutely SURE no error in serialization can happen
+            logger::warn!("{}", &log_conns("Too many connections"));
+            let _ = stream.write_all(Response::error("Too many connections").to_json().as_bytes());
             continue;
           }
 
@@ -78,11 +72,11 @@ pub fn listen() {
             CURRENT_CONNS.fetch_sub(1, Acquire);
           });
 
-          logger::info(&log_conns("Connection established"));
+          logger::info!("{}", &log_conns("Connection established"));
         }
       });
     }
 
-    logger::info("Listening for connections");
+    logger::info!("Listening for connections");
   });
 }

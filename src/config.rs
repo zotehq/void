@@ -11,36 +11,24 @@ pub struct Config {
   pub password: String,
   pub max_conns: usize,
   pub max_body_size: usize,
-  pub log_level: Option<String>,
+  pub log_level: Option<log::Level>,
 }
 
-pub static CONFIG: OnceLock<Config> = OnceLock::new();
+pub fn get() -> &'static Config {
+  static CONFIG: OnceLock<Config> = OnceLock::new();
+  CONFIG.get_or_init(|| {
+    let conf_string = match read_to_string("config.toml") {
+      Ok(s) => s,
+      Err(e) => {
+        logger::fatal!("Failed to load config: {}", e.to_string());
+      }
+    };
 
-#[inline]
-pub fn load(config_path: &str) {
-  let conf_string = match read_to_string(config_path) {
-    Ok(s) => s,
-    Err(e) => {
-      logger::fatal(&format!("Failed to load config: {}", e.to_string()));
-      return;
+    match toml::from_str::<Config>(&conf_string) {
+      Ok(c) => c,
+      Err(e) => {
+        logger::fatal!("Failed to parse config: {}", e.to_string());
+      }
     }
-  };
-
-  let conf = match toml::from_str::<Config>(&conf_string) {
-    Ok(c) => c,
-    Err(e) => {
-      logger::fatal(&format!("Failed to parse config: {}", e.to_string()));
-      return;
-    }
-  };
-
-  let _ = CONFIG.set(conf);
-}
-
-pub fn read() -> Config {
-  if CONFIG.get().is_none() {
-    load("config.toml");
-  }
-
-  CONFIG.get().unwrap().clone()
+  })
 }

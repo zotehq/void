@@ -1,6 +1,5 @@
 use crate::primitive_value::PrimitiveValue;
 use serde::Serialize;
-use std::error::Error;
 
 #[derive(Serialize)]
 pub struct Response {
@@ -49,7 +48,8 @@ impl Response {
     }
   }
 
-  pub fn to_json(&self) -> Result<String, Box<dyn Error>> {
-    Ok(serde_json::to_string(self)?)
+  pub fn to_json(&self) -> String {
+    // no serialization errors should ever occur
+    serde_json::to_string(self).unwrap()
   }
 }

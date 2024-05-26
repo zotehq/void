@@ -6,7 +6,7 @@ pub struct AuthResult {
 }
 
 pub fn auth(payload: &RequestPayload) -> AuthResult {
-  let conf = config::read();
+  let conf = config::get();
 
   if payload.username.is_none() || payload.password.is_none() {
     return AuthResult {

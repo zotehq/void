@@ -1,14 +1,29 @@
 use crate::{
-  logger,
-  request::Request,
-  server::{log_conns_minus_one, SERVER},
+  actions, config, logger, request::Request, response::Response, server::log_conns_minus_one,
 };
 use may::net::TcpStream;
-use std::{io::Read, sync::atomic::Ordering::Relaxed};
+use std::io::{Read, Write};
+
+fn write_response(stream: &mut TcpStream, response: &Response) -> bool {
+  match stream.write(response.to_json().unwrap().as_bytes()) {
+    Ok(_) => false,
+    Err(e) => {
+      logger::warn("Connection error (specifically in writing response to client)");
+      logger::trace(&e.to_string(), "conn_handler::write_response");
+      true
+    }
+  }
+}
+
+fn bad_request(stream: &mut TcpStream) -> bool {
+  write_response(stream, &Response::error("Bad request"))
+}
 
 pub fn handle_connection(mut stream: TcpStream) {
+  let mut authenticated = false;
+
   loop {
-    let mut request: Vec<u8> = vec![0; SERVER.max_body_size.load(Relaxed)];
+    let mut request: Vec<u8> = vec![0; config::read().max_body_size];
 
     match stream.read(&mut request) {
       Ok(0) => {
@@ -29,7 +44,12 @@ pub fn handle_connection(mut stream: TcpStream) {
       Err(e) => {
         logger::warn("Malformed request buffer from client");
         logger::trace(&e.to_string(), "conn_handler::handle_connection");
-        return;
+
+        if bad_request(&mut stream) {
+          return;
+        }
+
+        continue;
       }
     };
 
@@ -38,10 +58,37 @@ pub fn handle_connection(mut stream: TcpStream) {
       Err(e) => {
         logger::warn("Malformed request string from client");
         logger::trace(&e.to_string(), "conn_handler::handle_connection");
-        return;
+
+        if bad_request(&mut stream) {
+          return;
+        }
+
+        continue;
       }
     };
 
-    println!("request.action: {}", request.action);
+    match request.action.as_str() {
+      "AUTH" => {
+        if authenticated {
+          if write_response(&mut stream, &Response::error("Already authenticated")) {
+            return;
+          }
+
+          continue;
+        }
+
+        let auth_result = actions::auth(&request.payload);
+        authenticated = auth_result.is_authenticated;
+        if write_response(&mut stream, &auth_result.response) {
+          return;
+        }
+      }
+
+      _ => {
+        if write_response(&mut stream, &Response::error("Unknown action")) {
+          return;
+        }
+      }
+    }
   }
 }

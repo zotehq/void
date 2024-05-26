@@ -7,7 +7,7 @@ use futures_util::{
   SinkExt,
 };
 use protocol::{request::Request, response::Response};
-use std::{fmt, io::Error as IoError, str::FromStr, sync::OnceLock};
+use std::{fmt, io::Error as IoError, str::FromStr, sync::atomic};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_tungstenite::{
   accept_async_with_config,
@@ -58,17 +58,8 @@ pub trait Connection: Send + Sync + Unpin {
 
 // IMPLEMENTATION HELPERS
 
-pub struct ConfigCache {
-  pub max_body_size: usize,
-  pub ws_config: WebSocketConfig,
-}
-
-pub static CONFIG_CACHE: OnceLock<ConfigCache> = OnceLock::new();
-
-#[inline(always)]
-fn cfg() -> &'static ConfigCache {
-  CONFIG_CACHE.get().unwrap()
-}
+// should be faster than running config::get() all the time
+pub static MAX_BODY_SIZE: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
 
 pub trait RawStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
 impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S {}
@@ -92,11 +83,12 @@ macro_rules! wrap_malformed_req {
 
 // RAW TCP IMPLEMENTATION
 
-pub struct TcpConnection<S: RawStream>(S);
+// store max_body_size here too since its stored in the WebSocketConfig
+pub struct TcpConnection<S: RawStream>(S, usize);
 
 impl<S: RawStream> From<S> for TcpConnection<S> {
   fn from(value: S) -> Self {
-    Self(value)
+    Self(value, MAX_BODY_SIZE.load(atomic::Ordering::Relaxed))
   }
 }
 
@@ -114,7 +106,7 @@ impl<S: RawStream> Connection for TcpConnection<S> {
   }
 
   async fn recv(&mut self) -> Result<Request, ReceiveError> {
-    let mut request: Vec<u8> = vec![0; cfg().max_body_size];
+    let mut request: Vec<u8> = vec![0; self.1];
 
     match self.0.read(&mut request).await {
       Ok(0) => return Err(ReceiveError::ConnectionClosed),
@@ -127,7 +119,8 @@ impl<S: RawStream> Connection for TcpConnection<S> {
     };
 
     let request = wrap_malformed_req!(self, String::from_utf8(request));
-    Ok(wrap_malformed_req!(self, Request::from_str(request.trim())))
+    let request = request.trim_end_matches('\0').trim();
+    Ok(wrap_malformed_req!(self, Request::from_str(request)))
   }
 }
 
@@ -140,7 +133,12 @@ pub struct WebSocketConnection<S: AsyncRead + AsyncWrite + Send + Unpin>(
 
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> WebSocketConnection<S> {
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
-    let ws = accept_async_with_config(stream, Some(cfg().ws_config)).await?;
+    let cfg = WebSocketConfig {
+      max_message_size: Some(MAX_BODY_SIZE.load(atomic::Ordering::Relaxed)),
+      ..Default::default()
+    };
+
+    let ws = accept_async_with_config(stream, Some(cfg)).await?;
     let (write, read) = ws.split();
     Ok(Self(write, read))
   }

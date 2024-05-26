@@ -6,7 +6,7 @@ use std::{
   sync::{
     atomic::{
       AtomicUsize,
-      Ordering::{Acquire, Relaxed},
+      Ordering::{Relaxed, SeqCst},
     },
     Arc, OnceLock,
   },
@@ -16,10 +16,8 @@ use tokio_native_tls::{
   native_tls::{Identity, TlsAcceptor},
   TlsAcceptor as AsyncTlsAcceptor,
 };
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
-pub static TLS_ACCEPTOR: OnceLock<Arc<AsyncTlsAcceptor>> = OnceLock::new();
-pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
+// IMPLEMENTATION HELPERS
 
 #[derive(PartialEq, Eq)]
 enum Protocol {
@@ -36,27 +34,32 @@ impl fmt::Display for Protocol {
   }
 }
 
+pub static TLS_ACCEPTOR: OnceLock<Arc<AsyncTlsAcceptor>> = OnceLock::new();
+pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn fmt_conns() -> String {
+  let current_conns = CURRENT_CONNS.load(SeqCst);
+  let max_conns = config::get().max_conns;
+
+  format!(
+    "({current_conns} {} / {max_conns} max)",
+    if current_conns == 1 { "conn" } else { "conns" }
+  )
+}
+
 #[inline]
 pub fn connect() {
-  CURRENT_CONNS.fetch_add(1, Acquire);
-  logger::info!("{}", &log_conns("Connection established"));
+  CURRENT_CONNS.fetch_add(1, SeqCst);
+  logger::info!("Connection established {}", fmt_conns());
 }
 
 #[inline]
 pub fn disconnect() {
-  CURRENT_CONNS.fetch_sub(1, Acquire);
-  logger::info!("{}", &log_conns("Connection closed"));
+  CURRENT_CONNS.fetch_sub(1, SeqCst);
+  logger::info!("Connection closed {}", fmt_conns());
 }
 
-pub fn log_conns(msg: &str) -> String {
-  let current_conns = CURRENT_CONNS.load(Relaxed);
-  let max_conns = config::get().max_conns;
-
-  format!(
-    "{msg} ({current_conns} {} / {max_conns} max)",
-    if current_conns == 1 { "conn" } else { "conns" }
-  )
-}
+// SET UP LISTENERS
 
 pub async fn listen() {
   let conf = config::get();
@@ -64,6 +67,8 @@ pub async fn listen() {
   if !(conf.tcp.enabled || conf.ws.enabled) {
     logger::fatal!("No protocols enabled!");
   }
+
+  // SET UP TLS ACCEPTOR
 
   if conf.tcp.tls || conf.ws.tls {
     if conf.tls.is_none() {
@@ -84,13 +89,9 @@ pub async fn listen() {
     let _ = TLS_ACCEPTOR.set(Arc::new(acceptor.into()));
   }
 
-  let _ = CONFIG_CACHE.set(ConfigCache {
-    max_body_size: conf.max_body_size,
-    ws_config: WebSocketConfig {
-      max_message_size: Some(conf.max_body_size),
-      ..Default::default()
-    },
-  });
+  // START LISTENING FOR CONNECTIONS
+
+  MAX_BODY_SIZE.store(conf.max_body_size, Relaxed);
 
   let mut futures = (None, None);
 
@@ -145,14 +146,15 @@ macro_rules! listen_macro {
           Ok((s, _)) => s,
         };
 
-        let accept = CURRENT_CONNS.load(Relaxed) < $max_conns;
-
+        // unfortunately TcpStream and TlsStream are different types
+        // we can't overwrite `stream` for TLS and convert it generically
+        // convert the two stream types separately and store in conn
         let conn;
         if $tls {
           let acceptor = TLS_ACCEPTOR.get().unwrap().clone();
           let stream = match acceptor.accept(stream).await {
             Err(e) => {
-              logger::error!("Failed to accept TLS: {}", e);
+              logger::error!("Failed to accept TLS handshake: {}", e);
               continue;
             }
             Ok(s) => s,
@@ -162,7 +164,9 @@ macro_rules! listen_macro {
           conn = convert_stream(stream, $protocol).await;
         }
 
-        early_handle_conn(conn, accept).await;
+        // hand control off to connection handler
+        // only accept if we're below connection limit
+        conn_handoff(conn, CURRENT_CONNS.load(SeqCst) < $max_conns).await;
       }
     }
   };
@@ -170,6 +174,7 @@ macro_rules! listen_macro {
 
 use listen_macro;
 
+// convert raw stream into either a TCP or WebSocket connection
 #[inline(always)]
 async fn convert_stream<S: RawStream>(s: S, p: Protocol) -> Option<Arc<dyn Connection>> {
   if p == Protocol::Tcp {
@@ -185,14 +190,16 @@ async fn convert_stream<S: RawStream>(s: S, p: Protocol) -> Option<Arc<dyn Conne
   }
 }
 
-async fn early_handle_conn(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
+// do some small stuff to hand control off to the connection handler
+async fn conn_handoff(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
   let conn = match conn.as_mut() {
     Some(c) => Arc::get_mut(c).unwrap(),
     None => return,
   };
 
   if !accept {
-    logger::warn!("{}", &log_conns("Too many connections"));
+    logger::warn!("Too many connections {}", fmt_conns());
+    // ignore error since we don't want this connection anyways
     let _ = conn.send(Response::error("Too many connections")).await;
     return;
   }

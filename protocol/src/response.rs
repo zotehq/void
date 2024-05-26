@@ -1,18 +1,19 @@
 use crate::primitive_value::PrimitiveValue;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Response {
   error: bool,
   message: Option<String>,
   payload: Option<ResponsePayload>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ResponsePayload {
   key: String,
   value: PrimitiveValue,
-  expires_in: Option<i32>,
+  expires_in: Option<u64>,
 }
 
 impl Response {
@@ -47,9 +48,23 @@ impl Response {
       payload: Some(payload),
     }
   }
+}
 
-  pub fn to_json(&self) -> String {
-    // no serialization errors should ever occur
-    serde_json::to_string(self).unwrap()
+impl fmt::Display for Response {
+  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    match serde_json::to_string(self) {
+      Ok(s) => {
+        f.write_str(&s)?;
+        Ok(())
+      }
+      Err(_) => Err(fmt::Error),
+    }
+  }
+}
+
+impl std::str::FromStr for Response {
+  type Err = serde_json::Error;
+  fn from_str(s: &str) -> Result<Response, Self::Err> {
+    serde_json::from_str::<Response>(s)
   }
 }

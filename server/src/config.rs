@@ -26,6 +26,7 @@ pub struct Config {
   pub tcp: ConnectionConfig,
   pub ws: ConnectionConfig,
   pub tls: Option<TlsConfig>,
+  pub autosave_interval: u64,
   pub username: String,
   pub password: String,
   pub max_conns: usize,
@@ -49,6 +50,7 @@ impl Default for Config {
         tls: false,
       },
       tls: Some(TlsConfig::default()),
+      autosave_interval: 60,
       username: "admin".to_owned(),
       password: "password".to_owned(),
       max_conns: 10000,
@@ -73,12 +75,12 @@ pub fn get() -> &'static Config {
     }
 
     if !config_found {
-      logger::info!("No config found! Creating one...");
+      logger::info!("config.toml not found, creating...");
       wrap_fatal!(create(), "Failed to create config: {}");
-      return Config::default();
+      Config::default()
+    } else {
+      let conf_string = wrap_fatal!(read_to_string("config.toml"), "Failed to load config: {}");
+      wrap_fatal!(from_str(&conf_string), "Failed to parse config: {}")
     }
-
-    let conf_string = wrap_fatal!(read_to_string("config.toml"), "Failed to load config: {}");
-    wrap_fatal!(from_str(&conf_string), "Failed to parse config: {}")
   })
 }

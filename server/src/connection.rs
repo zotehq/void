@@ -1,13 +1,24 @@
-use crate::{
-  actions, logger,
-  server::{connect, disconnect},
+use crate::{config, logger, MapValue, MAP};
+use protocol::{
+  request::Request,
+  response::{Response, ResponsePayload},
 };
+
+// std
+
+use std::sync::atomic::{
+  AtomicUsize,
+  Ordering::{Relaxed, SeqCst},
+};
+use std::time::{Duration, SystemTime};
+use std::{fmt, io::Error as IoError, str::FromStr};
+
+// async (tokio/futures)
+
 use futures_util::{
   stream::{SplitSink, SplitStream, StreamExt},
   SinkExt,
 };
-use protocol::{request::Request, response::Response};
-use std::{fmt, io::Error as IoError, str::FromStr, sync::atomic};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_tungstenite::{
   accept_async_with_config,
@@ -56,10 +67,10 @@ pub trait Connection: Send + Sync + Unpin {
   async fn recv(&mut self) -> Result<Request, ReceiveError>;
 }
 
-// IMPLEMENTATION HELPERS
+// CONNECTION IMPLEMENTATION HELPERS
 
 // should be faster than running config::get() all the time
-pub static MAX_BODY_SIZE: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
+pub static MAX_BODY_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 pub trait RawStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
 impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S {}
@@ -88,20 +99,19 @@ pub struct TcpConnection<S: RawStream>(S, usize);
 
 impl<S: RawStream> From<S> for TcpConnection<S> {
   fn from(value: S) -> Self {
-    Self(value, MAX_BODY_SIZE.load(atomic::Ordering::Relaxed))
+    Self(value, MAX_BODY_SIZE.load(Relaxed))
   }
 }
 
 #[async_trait::async_trait]
 impl<S: RawStream> Connection for TcpConnection<S> {
   async fn send(&mut self, res: Response) -> bool {
-    match self.0.write_all(res.to_string().as_bytes()).await {
-      Ok(_) => false,
-      Err(e) => {
-        logger::warn!("Connection error (specifically in writing response to client)");
-        logger::trace!(target: "conn_handler::write_response", "{}", e);
-        true
-      }
+    if let Err(e) = self.0.write_all(res.to_string().as_bytes()).await {
+      logger::warn!("Connection error while writing response to client");
+      logger::trace!(target: "conn_handler::write_response", "{}", e);
+      true
+    } else {
+      false
     }
   }
 
@@ -134,7 +144,7 @@ pub struct WebSocketConnection<S: AsyncRead + AsyncWrite + Send + Unpin>(
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> WebSocketConnection<S> {
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
     let cfg = WebSocketConfig {
-      max_message_size: Some(MAX_BODY_SIZE.load(atomic::Ordering::Relaxed)),
+      max_message_size: Some(MAX_BODY_SIZE.load(Relaxed)),
       ..Default::default()
     };
 
@@ -143,15 +153,26 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> WebSocketConnection<S> {
     Ok(Self(write, read))
   }
 
+  #[inline]
+  async fn write(&mut self, msg: Message) -> bool {
+    if let Err(e) = self.0.send(msg).await {
+      logger::warn!("Connection error while writing response to client");
+      logger::trace!(target: "conn_handler::write_response", "{}", e);
+      true
+    } else {
+      false
+    }
+  }
+
   async fn pong(&mut self, ping: Vec<u8>) -> bool {
-    self.0.send(Message::Pong(ping)).await.is_err()
+    self.write(Message::Pong(ping)).await
   }
 }
 
 #[async_trait::async_trait]
 impl<S: AsyncRead + AsyncWrite + Send + Unpin> Connection for WebSocketConnection<S> {
   async fn send(&mut self, res: Response) -> bool {
-    self.0.send(Message::Text(res.to_string())).await.is_err()
+    self.write(Message::Text(res.to_string())).await
   }
 
   async fn recv(&mut self) -> Result<Request, ReceiveError> {
@@ -172,10 +193,72 @@ impl<S: AsyncRead + AsyncWrite + Send + Unpin> Connection for WebSocketConnectio
   }
 }
 
+// HANDLER IMPLEMENTATION HELPERS
+
+pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
+
+pub fn fmt_conns() -> String {
+  let current_conns = CURRENT_CONNS.load(SeqCst);
+  let max_conns = config::get().max_conns;
+
+  format!(
+    "({current_conns} {} / {max_conns} max)",
+    if current_conns == 1 { "conn" } else { "conns" }
+  )
+}
+
+async fn handle_map_value(key: String, val: MapValue) -> Option<ResponsePayload> {
+  let expires_in = if let Some(st) = val.expiry {
+    if let Ok(dur) = st.duration_since(SystemTime::now()) {
+      Some(dur.as_secs())
+    } else {
+      let mut write = MAP.get().unwrap().write().await;
+      write.remove(&key);
+      drop(write);
+
+      return None;
+    }
+  } else {
+    None
+  };
+
+  Some(ResponsePayload {
+    key,
+    value: val.value,
+    expires_in,
+  })
+}
+
+#[macro_export]
+macro_rules! wrap_overwrite {
+  ($conn:ident, $key:expr, $write:ident => $expr:expr) => {
+    let mut $write = MAP.get().unwrap().write().await;
+    if let Some(val) = $expr {
+      drop($write); // drop ASAP we don't need this lock anymore
+      if let Some(payload) = handle_map_value($key, val.clone()).await {
+        // value existed and hadn't expired, send as payload
+        if $conn.send(Response::success_payload("OK", payload)).await {
+          return;
+        } else {
+          continue;
+        }
+      }
+      // value expired
+    }
+    // value already didn't exist
+
+    if $conn.send(Response::success("OK")).await {
+      return;
+    }
+  };
+}
+
 // CONNECTION HANDLER
 
 pub async fn handle_conn(conn: &mut dyn Connection) {
-  connect();
+  CURRENT_CONNS.fetch_add(1, SeqCst);
+  logger::info!("Connection established {}", fmt_conns());
+
   let mut authenticated = false;
 
   loop {
@@ -187,25 +270,67 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
     };
 
     match request {
-      Request::Auth { username, password } => {
-        if authenticated {
-          if conn.send(Response::error("Already authenticated")).await {
-            return;
-          }
-
-          continue;
-        }
-
-        let auth_result = actions::auth(&username, &password);
-        authenticated = auth_result.is_authenticated;
-        if conn.send(auth_result.response).await {
+      Request::Auth { .. } if authenticated => {
+        logger::debug!("Redundant AUTH attempted");
+        if conn.send(Response::error("Already authenticated")).await {
           return;
         }
       }
 
-      _ => todo!(),
+      Request::Auth { username, password } => {
+        let conf = config::get();
+        if username == conf.username && password == conf.password {
+          authenticated = true;
+          logger::debug!("AUTH succeeded");
+          if conn.send(Response::success("OK")).await {
+            return;
+          }
+        } else {
+          logger::debug!("AUTH failed with invalid credentials");
+          if conn.send(Response::error("Invalid credentials")).await {
+            return;
+          }
+        }
+      }
+
+      Request::Get { key } if authenticated => {
+        if let Some(val) = MAP.get().unwrap().read().await.get(&key) {
+          if let Some(payload) = handle_map_value(key, val.clone()).await {
+            if conn.send(Response::success_payload("OK", payload)).await {
+              return;
+            }
+          } else if conn.send(Response::error("Key expired")).await {
+            return;
+          } else {
+            continue;
+          }
+        } else if conn.send(Response::error("No such key")).await {
+          return;
+        }
+      }
+
+      Request::Delete { key } if authenticated => {
+        wrap_overwrite!(conn, key, write => write.remove(&key));
+      }
+
+      Request::Set {
+        key,
+        value,
+        expires_in,
+      } if authenticated => {
+        let expiry = expires_in.map(|exp| SystemTime::now() + Duration::from_secs(exp));
+        wrap_overwrite!(conn, key, write => write.insert(key.clone(), MapValue { value, expiry }));
+      }
+
+      _ => {
+        // (redundant) authentication & malformed requests will be caught before this point
+        if conn.send(Response::error("Authentication required")).await {
+          return;
+        }
+      }
     }
   }
 
-  disconnect();
+  CURRENT_CONNS.fetch_sub(1, SeqCst);
+  logger::info!("Connection closed {}", fmt_conns());
 }

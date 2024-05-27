@@ -4,16 +4,16 @@ use std::fmt;
 
 #[derive(Serialize, Deserialize)]
 pub struct Response {
-  error: bool,
-  message: Option<String>,
-  payload: Option<ResponsePayload>,
+  pub error: bool,
+  pub message: Option<String>,
+  pub payload: Option<ResponsePayload>,
 }
 
 #[derive(Serialize, Deserialize)]
 pub struct ResponsePayload {
-  key: String,
-  value: PrimitiveValue,
-  expires_in: Option<u64>,
+  pub key: String,
+  pub value: PrimitiveValue,
+  pub expires_in: Option<u64>,
 }
 
 impl Response {

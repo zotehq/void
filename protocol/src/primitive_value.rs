@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(untagged)]
 pub enum PrimitiveValue {
   String(String),

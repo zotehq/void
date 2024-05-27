@@ -13,13 +13,13 @@ pub enum Request {
   Get {
     key: String,
   },
+  Delete {
+    key: String,
+  },
   Set {
     key: String,
     value: PrimitiveValue,
     expires_in: Option<u64>,
-  },
-  Delete {
-    key: String,
   },
 }
 

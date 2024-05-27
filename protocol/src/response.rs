@@ -3,9 +3,35 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Serialize, Deserialize)]
+pub enum Status {
+  // COMMON
+  #[serde(rename = "OK")]
+  Success,
+  #[serde(rename = "Too many connections")]
+  ConnLimit,
+  #[serde(rename = "Malformed request")]
+  BadRequest,
+
+  // AUTH
+  #[serde(rename = "Authentication required")]
+  AuthRequired,
+  #[serde(rename = "Invalid credentials")]
+  BadCredentials,
+  #[serde(rename = "Already authenticated")]
+  RedundantAuth,
+
+  // GET
+  #[serde(rename = "Key expired")]
+  KeyExpired,
+  #[serde(rename = "No such key")]
+  NoSuchKey,
+}
+
+pub use Status::*;
+
+#[derive(Serialize, Deserialize)]
 pub struct Response {
-  pub error: bool,
-  pub message: Option<String>,
+  pub status: Status,
   pub payload: Option<ResponsePayload>,
 }
 
@@ -17,34 +43,35 @@ pub struct ResponsePayload {
 }
 
 impl Response {
-  pub fn success(message: &str) -> Self {
-    Self {
-      error: false,
-      message: Some(message.to_string()),
-      payload: None,
-    }
-  }
+  // OK is common
 
-  pub fn success_payload(message: &str, payload: ResponsePayload) -> Self {
+  pub const OK: Self = Self {
+    status: Status::Success,
+    payload: None,
+  };
+
+  #[inline]
+  pub fn ok(payload: ResponsePayload) -> Self {
     Self {
-      error: false,
-      message: Some(message.to_string()),
+      status: Status::Success,
       payload: Some(payload),
     }
   }
 
-  pub fn error(message: &str) -> Self {
+  // non-OK responses
+
+  #[inline]
+  pub fn status(status: Status) -> Self {
     Self {
-      error: true,
-      message: Some(message.to_string()),
+      status,
       payload: None,
     }
   }
 
-  pub fn error_payload(message: &str, payload: ResponsePayload) -> Self {
+  #[inline]
+  pub fn payload(status: Status, payload: ResponsePayload) -> Self {
     Self {
-      error: true,
-      message: Some(message.to_string()),
+      status,
       payload: Some(payload),
     }
   }

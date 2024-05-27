@@ -1,17 +1,8 @@
 use crate::{config, connection::*, logger, wrap_fatal};
-use protocol::response::Response;
-use std::{
-  fs::read,
-  sync::{
-    atomic::Ordering::{Relaxed, SeqCst},
-    Arc, OnceLock,
-  },
-};
+use protocol::response::{Response, Status::ConnLimit};
+use std::sync::{atomic::Ordering::*, Arc, OnceLock};
 use tokio::{join, net::TcpListener};
-use tokio_native_tls::{
-  native_tls::{Identity, TlsAcceptor},
-  TlsAcceptor as AsyncTlsAcceptor,
-};
+use tokio_native_tls::{native_tls, TlsAcceptor as AsyncTlsAcceptor};
 
 // IMPLEMENTATION HELPERS
 
@@ -41,7 +32,7 @@ async fn conn_handoff(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
   if !accept {
     logger::warn!("Too many connections {}", fmt_conns());
     // ignore error since we don't want this connection anyways
-    let _ = conn.send(Response::error("Too many connections")).await;
+    let _ = conn.send(Response::status(ConnLimit)).await;
     return;
   }
 
@@ -89,7 +80,7 @@ macro_rules! listener {
 
         // hand control off to connection handler
         // only accept if we're below connection limit
-        conn_handoff(conn, CURRENT_CONNS.load(SeqCst) < $max_conns).await;
+        tokio::spawn(conn_handoff(conn, CURRENT_CONNS.load(SeqCst) < $max_conns));
       }
     }
   };
@@ -114,14 +105,14 @@ pub async fn listen() {
     }
 
     let tls = conf.tls.as_ref().unwrap();
-    let cert = wrap_fatal!(read(&tls.cert), "Failed to parse TLS cert: {}");
-    let key = wrap_fatal!(read(&tls.key), "Failed to parse TLS key: {}");
+    let cert = wrap_fatal!(std::fs::read(&tls.cert), "Failed to parse TLS cert: {}");
+    let key = wrap_fatal!(std::fs::read(&tls.key), "Failed to parse TLS key: {}");
     let identity = wrap_fatal!(
-      Identity::from_pkcs8(&cert, &key),
+      native_tls::Identity::from_pkcs8(&cert, &key),
       "Failed to create TLS identity: {}"
     );
     let acceptor = wrap_fatal!(
-      TlsAcceptor::new(identity),
+      native_tls::TlsAcceptor::new(identity),
       "Failed to create TLS acceptor: {}"
     );
     let _ = TLS_ACCEPTOR.set(acceptor.into());

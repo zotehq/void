@@ -14,31 +14,27 @@ impl<S: RawStream> From<S> for TcpConnection<S> {
 
 #[async_trait::async_trait]
 impl<S: RawStream> Connection for TcpConnection<S> {
-  async fn send(&mut self, res: Response) -> bool {
-    if let Err(e) = self.0.write_all(res.to_string().as_bytes()).await {
-      warn!("Connection error while writing response to client");
-      trace!(target: "conn_handler::write_response", "{}", e);
-      true
-    } else {
-      false
+  #[inline]
+  async fn send(&mut self, res: Response) -> Result<(), Error> {
+    match self.0.write_all(res.to_string().as_bytes()).await {
+      Err(e) => Err(Error::IoError(e)),
+      Ok(_) => Ok(()),
     }
   }
 
-  async fn recv(&mut self) -> Result<Request, ReceiveError> {
+  async fn recv(&mut self) -> Result<Request, Error> {
     let mut request: Vec<u8> = vec![0; self.1];
 
     match self.0.read(&mut request).await {
-      Ok(0) => return Err(ReceiveError::ConnectionClosed),
+      Ok(0) => return Err(Error::Closed),
       Ok(amt) => request.shrink_to(amt),
       Err(e) => {
-        warn!("Connection error while reading request from client");
-        trace!(target: "conn_handler::handle_conn", "{}", e);
-        return Err(ReceiveError::ConnectionError(e));
+        return Err(Error::IoError(e));
       }
     };
 
-    let request = wrap_malformed_req!(self, String::from_utf8(request));
+    let request = wrap_malformed_req!(String::from_utf8(request));
     let request = request.trim_end_matches('\0').trim();
-    Ok(wrap_malformed_req!(self, Request::from_str(request)))
+    Ok(wrap_malformed_req!(Request::from_str(request)))
   }
 }

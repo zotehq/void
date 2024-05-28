@@ -14,33 +14,18 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 // CONNECTION TRAIT
 
-pub enum ReceiveError {
-  ConnectionClosed,
-  ConnectionError(IoError),
-  MalformedRequest(bool), // response failed?
+pub enum Error {
+  Closed,
+  IoError(IoError),
+  BadRequest,
 }
 
-impl ReceiveError {
-  #[inline]
-  pub fn fatal(&self) -> bool {
-    match *self {
-      ReceiveError::MalformedRequest(failed) => failed,
-      _ => false,
-    }
-  }
-}
-
-impl fmt::Display for ReceiveError {
+impl fmt::Display for Error {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match self {
-      Self::ConnectionClosed => write!(f, "Connection closed")?,
-      Self::ConnectionError(e) => write!(f, "Connection error: {}", e)?,
-      Self::MalformedRequest(c) => {
-        write!(f, "Malformed request from client")?;
-        if *c {
-          write!(f, " (response failed!)")?;
-        }
-      }
+      Self::Closed => write!(f, "Connection closed")?,
+      Self::IoError(e) => write!(f, "I/O error: {}", e)?,
+      Self::BadRequest => write!(f, "Malformed request from client")?,
     }
     Ok(())
   }
@@ -48,9 +33,8 @@ impl fmt::Display for ReceiveError {
 
 #[async_trait::async_trait]
 pub trait Connection: Send + Sync + Unpin {
-  // if true, error occurred
-  async fn send(&mut self, res: Response) -> bool;
-  async fn recv(&mut self) -> Result<Request, ReceiveError>;
+  async fn send(&mut self, res: Response) -> Result<(), Error>;
+  async fn recv(&mut self) -> Result<Request, Error>;
 }
 
 // CONNECTION TRAIT IMPLEMENTATION HELPERS
@@ -63,18 +47,10 @@ impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S 
 
 #[macro_export]
 macro_rules! wrap_malformed_req {
-  ($self:ident, $in:expr) => {
+  ($in:expr) => {
     match $in {
       Ok(o) => o,
-      Err(e) => {
-        let responded = $self.send(Response::status(BadRequest)).await;
-        let err = ReceiveError::MalformedRequest(!responded);
-
-        warn!("{}", err);
-        trace!(target: "conn_handler::handle_conn", "{}", e);
-
-        return Err(err);
-      }
+      Err(_) => return Err(Error::BadRequest),
     }
   };
 }
@@ -95,7 +71,7 @@ pub fn fmt_conns() -> String {
   )
 }
 
-async fn build_payload(key: String, val: MapValue) -> Option<ResponsePayload> {
+async fn build_payload(key: String, val: MapValue) -> Option<Payload> {
   let expires_in = if let Some(st) = val.expiry {
     if let Ok(dur) = st.duration_since(SystemTime::now()) {
       Some(dur.as_secs())
@@ -110,11 +86,21 @@ async fn build_payload(key: String, val: MapValue) -> Option<ResponsePayload> {
     None
   };
 
-  Some(ResponsePayload {
+  Some(Payload::MapData {
     key,
     value: val.value,
     expires_in,
   })
+}
+
+#[macro_export]
+macro_rules! wrap_send {
+  ($send:expr) => {
+    if let Err(e) = $send {
+      warn!("{}", e);
+      return;
+    }
+  };
 }
 
 #[macro_export]
@@ -125,19 +111,14 @@ macro_rules! wrap_overwrite {
       drop($write); // drop ASAP we don't need this lock anymore
       if let Some(payload) = build_payload($key, val.clone()).await {
         // value existed and hadn't expired, send as payload
-        if $conn.send(Response::ok(payload)).await {
-          return;
-        } else {
-          continue;
-        }
+        wrap_send!($conn.send(Response::ok(payload)).await);
+        continue;
       }
       // value expired
     }
     // value already didn't exist
 
-    if $conn.send(Response::OK).await {
-      return;
-    }
+    wrap_send!($conn.send(Response::OK).await);
   };
 }
 
@@ -152,17 +133,30 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
   loop {
     let request = match conn.recv().await {
       Ok(r) => r,
-      Err(ReceiveError::ConnectionClosed) => break,
-      Err(e) if e.fatal() => return,
-      _ => continue,
+      Err(e) => match e {
+        Error::Closed => break,
+        Error::IoError(_) => {
+          warn!("{}", e);
+          continue;
+        }
+        Error::BadRequest => {
+          warn!("{}", e);
+          wrap_send!(conn.send(Response::status(BadRequest)).await);
+          continue;
+        }
+      },
     };
 
     match request {
+      Request::Ping { payload } => wrap_send!(
+        conn
+          .send(Response::payload(Pong, Payload::Pong(payload)))
+          .await
+      ),
+
       Request::Auth { .. } if authenticated => {
         debug!("Redundant AUTH attempted");
-        if conn.send(Response::status(RedundantAuth)).await {
-          return;
-        }
+        wrap_send!(conn.send(Response::status(RedundantAuth)).await);
       }
 
       Request::Auth { username, password } => {
@@ -170,30 +164,23 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
         if username == conf.username && password == conf.password {
           authenticated = true;
           debug!("AUTH succeeded");
-          if conn.send(Response::OK).await {
-            return;
-          }
+          wrap_send!(conn.send(Response::OK).await);
         } else {
           debug!("AUTH failed with invalid credentials");
-          if conn.send(Response::status(BadCredentials)).await {
-            return;
-          }
+          wrap_send!(conn.send(Response::status(BadCredentials)).await);
         }
       }
 
       Request::Get { key } if authenticated => {
         if let Some(val) = MAP.get().unwrap().read().await.get(&key) {
           if let Some(payload) = build_payload(key, val.clone()).await {
-            if conn.send(Response::ok(payload)).await {
-              return;
-            }
-          } else if conn.send(Response::status(KeyExpired)).await {
-            return;
+            wrap_send!(conn.send(Response::ok(payload)).await);
           } else {
+            wrap_send!(conn.send(Response::status(KeyExpired)).await);
             continue;
           }
-        } else if conn.send(Response::status(NoSuchKey)).await {
-          return;
+        } else {
+          wrap_send!(conn.send(Response::status(NoSuchKey)).await);
         }
       }
 
@@ -210,12 +197,8 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
         wrap_overwrite!(conn, key, write => write.insert(key.clone(), MapValue { value, expiry }));
       }
 
-      _ => {
-        // (redundant) authentication & malformed requests will be caught before this point
-        if conn.send(Response::status(AuthRequired)).await {
-          return;
-        }
-      }
+      // (redundant) authentication & malformed requests will be caught before this point
+      _ => wrap_send!(conn.send(Response::status(AuthRequired)).await),
     }
   }
 

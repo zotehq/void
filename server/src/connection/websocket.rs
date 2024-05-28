@@ -1,6 +1,6 @@
 use super::*;
 
-use std::sync::atomic::Ordering::Relaxed;
+use std::{io::ErrorKind as IoErrorKind, sync::atomic::Ordering::Relaxed};
 
 use futures_util::{
   stream::{SplitSink, SplitStream, StreamExt},
@@ -29,41 +29,42 @@ impl<S: RawStream> WebSocketConnection<S> {
     Ok(Self(write, read))
   }
 
-  #[inline]
-  async fn write(&mut self, msg: Message) -> bool {
-    if let Err(e) = self.0.send(msg).await {
-      warn!("Connection error while writing response to client");
-      trace!(target: "conn_handler::write_response", "{}", e);
-      true
-    } else {
-      false
+  async fn write(&mut self, msg: Message) -> Result<(), Error> {
+    match self.0.send(msg).await {
+      Err(e) => Err(Error::IoError(match e {
+        WsError::Io(e) => e,
+        WsError::Utf8 => IoError::from(IoErrorKind::InvalidData),
+        _ => IoError::from(IoErrorKind::Other),
+      })),
+      Ok(_) => Ok(()),
     }
-  }
-
-  async fn pong(&mut self, ping: Vec<u8>) -> bool {
-    self.write(Message::Pong(ping)).await
   }
 }
 
 #[async_trait::async_trait]
 impl<S: RawStream> Connection for WebSocketConnection<S> {
-  async fn send(&mut self, res: Response) -> bool {
-    self.write(Message::Text(res.to_string())).await
+  #[inline]
+  async fn send(&mut self, res: Response) -> Result<(), Error> {
+    if let Payload::Pong(bytes) = res.payload.as_ref().unwrap() {
+      self.write(Message::Pong(bytes.clone())).await
+    } else {
+      self.write(Message::Text(res.to_string())).await
+    }
   }
 
-  async fn recv(&mut self) -> Result<Request, ReceiveError> {
+  async fn recv(&mut self) -> Result<Request, Error> {
     match self.1.next().await {
-      None => Err(ReceiveError::ConnectionClosed),
-      Some(msg) => match wrap_malformed_req!(self, msg) {
-        Message::Text(s) => Ok(wrap_malformed_req!(self, Request::from_str(s.trim()))),
+      None => Err(Error::Closed),
+      Some(msg) => match wrap_malformed_req!(msg) {
+        Message::Text(s) => Ok(wrap_malformed_req!(Request::from_str(s.trim()))),
         Message::Binary(b) => {
-          let request = wrap_malformed_req!(self, String::from_utf8(b));
-          Ok(wrap_malformed_req!(self, Request::from_str(request.trim())))
+          let request = wrap_malformed_req!(String::from_utf8(b));
+          Ok(wrap_malformed_req!(Request::from_str(request.trim())))
         }
-        // handle pings, but still treat as a malformed request.
-        Message::Ping(p) => Err(ReceiveError::MalformedRequest(self.pong(p).await)),
-        Message::Close(_) => Err(ReceiveError::ConnectionClosed),
-        _ => Err(wrap_malformed_req!(self, Err("Invalid message type"))),
+        // WebSocket spec forces payload to be <=125 bytes, don't check
+        Message::Ping(payload) => Ok(Request::Ping { payload }),
+        Message::Close(_) => Err(Error::Closed),
+        _ => Err(Error::BadRequest),
       },
     }
   }

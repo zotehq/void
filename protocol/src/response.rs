@@ -1,4 +1,4 @@
-use crate::primitive_value::PrimitiveValue;
+use crate::{from_b64, primitive_value::PrimitiveValue, to_b64};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -11,6 +11,10 @@ pub enum Status {
   ConnLimit,
   #[serde(rename = "Malformed request")]
   BadRequest,
+
+  // PING/PONG
+  #[serde(rename = "Pong!")]
+  Pong,
 
   // AUTH
   #[serde(rename = "Authentication required")]
@@ -32,14 +36,18 @@ pub use Status::*;
 #[derive(Serialize, Deserialize)]
 pub struct Response {
   pub status: Status,
-  pub payload: Option<ResponsePayload>,
+  pub payload: Option<Payload>,
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct ResponsePayload {
-  pub key: String,
-  pub value: PrimitiveValue,
-  pub expires_in: Option<u64>,
+#[serde(untagged)] // we deal with tagging in status
+pub enum Payload {
+  Pong(#[serde(deserialize_with = "from_b64", serialize_with = "to_b64")] Vec<u8>),
+  MapData {
+    key: String,
+    value: PrimitiveValue,
+    expires_in: Option<u64>,
+  },
 }
 
 impl Response {
@@ -51,7 +59,7 @@ impl Response {
   };
 
   #[inline]
-  pub fn ok(payload: ResponsePayload) -> Self {
+  pub fn ok(payload: Payload) -> Self {
     Self {
       status: Status::Success,
       payload: Some(payload),
@@ -69,7 +77,7 @@ impl Response {
   }
 
   #[inline]
-  pub fn payload(status: Status, payload: ResponsePayload) -> Self {
+  pub fn payload(status: Status, payload: Payload) -> Self {
     Self {
       status,
       payload: Some(payload),

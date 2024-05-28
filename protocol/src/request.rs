@@ -1,4 +1,4 @@
-use crate::primitive_value::PrimitiveValue;
+use crate::{from_b64, primitive_value::PrimitiveValue, to_b64};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -6,6 +6,10 @@ use std::fmt;
 #[serde(tag = "action")]
 #[serde(rename_all = "UPPERCASE")]
 pub enum Request {
+  Ping {
+    #[serde(deserialize_with = "from_b64", serialize_with = "to_b64")]
+    payload: Vec<u8>,
+  },
   Auth {
     username: String,
     password: String,

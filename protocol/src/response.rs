@@ -1,8 +1,8 @@
-use crate::{from_b64, primitive_value::PrimitiveValue, to_b64};
+use crate::{from_b64, to_b64, Table, TableValue};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
   // COMMON
   #[serde(rename = "OK")]
@@ -24,11 +24,15 @@ pub enum Status {
   #[serde(rename = "Already authenticated")]
   RedundantAuth,
 
-  // GET
-  #[serde(rename = "Key expired")]
-  KeyExpired,
+  // TABLES/KEYS
+  #[serde(rename = "Already exists")]
+  AlreadyExists,
+  #[serde(rename = "No such table")]
+  NoSuchTable,
   #[serde(rename = "No such key")]
   NoSuchKey,
+  #[serde(rename = "Key expired")]
+  KeyExpired,
 }
 
 pub use Status::*;
@@ -36,17 +40,30 @@ pub use Status::*;
 #[derive(Serialize, Deserialize)]
 pub struct Response {
   pub status: Status,
+  #[serde(flatten)]
   pub payload: Option<Payload>,
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(untagged)] // we deal with tagging in status
+#[serde(untagged)] // we flatten this enum and have unique fields
 pub enum Payload {
-  Pong(#[serde(deserialize_with = "from_b64", serialize_with = "to_b64")] Vec<u8>),
-  MapData {
+  Pong {
+    #[serde(deserialize_with = "from_b64", serialize_with = "to_b64")]
+    payload: Vec<u8>,
+  },
+  Tables {
+    tables: Vec<String>,
+  },
+  Keys {
+    keys: Vec<String>,
+  },
+  Table {
+    table: Table,
+  },
+  TableValue {
+    table: String,
     key: String,
-    value: PrimitiveValue,
-    expires_in: Option<u64>,
+    value: TableValue,
   },
 }
 

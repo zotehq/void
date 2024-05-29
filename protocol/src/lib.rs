@@ -1,6 +1,12 @@
-pub mod primitive_value;
-pub mod request;
-pub mod response;
+mod request;
+mod response;
+mod table;
+
+pub use request::*;
+pub use response::*;
+pub use table::*;
+
+// SERDE HELPERS
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{de::Error as _, ser::Error as _, Deserialize, Deserializer, Serializer};

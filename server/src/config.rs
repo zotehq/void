@@ -1,4 +1,4 @@
-use crate::{logger, wrap_fatal};
+use crate::{logger::*, wrap_fatal};
 use serde::{Deserialize, Serialize};
 use std::{
   fs::{metadata, read_to_string, File},
@@ -75,7 +75,7 @@ pub fn get() -> &'static Config {
     }
 
     if !config_found {
-      logger::info!("config.toml not found, creating...");
+      info!("config.toml not found, creating...");
       wrap_fatal!(create(), "Failed to create config: {}");
       Config::default()
     } else {

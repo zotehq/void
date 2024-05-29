@@ -1,4 +1,4 @@
-use crate::{from_b64, primitive_value::PrimitiveValue, to_b64};
+use crate::{from_b64, to_b64, InsertTable, InsertTableValue};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -14,16 +14,41 @@ pub enum Request {
     username: String,
     password: String,
   },
+
+  // TABLE OPERATIONS
+  #[serde(rename = "LIST TABLE")]
+  ListTables,
+  #[serde(rename = "INSERT TABLE")]
+  InsertTable {
+    table: String,
+    contents: Option<InsertTable>,
+  },
+  #[serde(rename = "GET TABLE")]
+  GetTable {
+    table: String,
+  },
+  #[serde(rename = "DELETE TABLE")]
+  DeleteTable {
+    table: String,
+  },
+
+  // KEY OPERATIONS
+  List {
+    table: String,
+  },
   Get {
+    table: String,
     key: String,
   },
   Delete {
+    table: String,
     key: String,
   },
-  Set {
+  Insert {
+    table: String,
     key: String,
-    value: PrimitiveValue,
-    expires_in: Option<u64>,
+    #[serde(flatten)]
+    value: InsertTableValue,
   },
 }
 

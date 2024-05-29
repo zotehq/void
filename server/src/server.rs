@@ -1,5 +1,5 @@
-use crate::{config, connection::*, logger, wrap_fatal};
-use protocol::response::{Response, Status::ConnLimit};
+use crate::{config, connection::*, logger::*, wrap_fatal};
+use protocol::{Response, Status::ConnLimit};
 use std::sync::{atomic::Ordering::*, Arc, OnceLock};
 use tokio::{join, net::TcpListener};
 use tokio_native_tls::{native_tls, TlsAcceptor as AsyncTlsAcceptor};
@@ -16,7 +16,7 @@ async fn convert_stream<S: RawStream>(stream: S, protocol: &str) -> Option<Arc<d
   match WebSocketConnection::convert_stream(stream).await {
     Ok(c) => Some(Arc::new(c)),
     Err(e) => {
-      logger::error!("Failed to convert TCP stream to WebSocket: {}", e);
+      error!("Failed to convert TCP stream to WebSocket: {}", e);
       None
     }
   }
@@ -30,7 +30,7 @@ async fn conn_handoff(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
   };
 
   if !accept {
-    logger::warn!("Too many connections {}", fmt_conns());
+    warn!("Too many connections {}", fmt_conns());
     // ignore error since we don't want this connection anyways
     let _ = conn.send(Response::status(ConnLimit)).await;
     return;
@@ -46,16 +46,16 @@ macro_rules! listener {
       let listener = match TcpListener::bind($addr.clone()).await {
         Ok(l) => l,
         Err(e) => {
-          logger::fatal!("Failed to bind: {}", e);
+          fatal!("Failed to bind: {}", e);
         }
       };
 
-      logger::info!("Listening for connections on {} at {}", $protocol, $addr);
+      info!("Listening for connections on {} at {}", $protocol, $addr);
 
       loop {
         let stream = match listener.accept().await {
           Err(e) => {
-            logger::error!("Connection failed: {}", e);
+            error!("Connection failed: {}", e);
             continue;
           }
           Ok((s, _)) => s,
@@ -64,19 +64,18 @@ macro_rules! listener {
         // unfortunately TcpStream and TlsStream are different types
         // we can't overwrite `stream` for TLS and convert it generically
         // convert the two stream types separately and store in conn
-        let conn;
-        if $tls {
+        let conn = if $tls {
           let stream = match TLS_ACCEPTOR.get().unwrap().accept(stream).await {
             Err(e) => {
-              logger::error!("Failed to accept TLS handshake: {}", e);
+              error!("Failed to accept TLS handshake: {}", e);
               continue;
             }
             Ok(s) => s,
           };
-          conn = convert_stream(stream, $protocol).await;
+          convert_stream(stream, $protocol).await
         } else {
-          conn = convert_stream(stream, $protocol).await;
-        }
+          convert_stream(stream, $protocol).await
+        };
 
         // hand control off to connection handler
         // only accept if we're below connection limit
@@ -94,14 +93,14 @@ pub async fn listen() {
   let conf = config::get();
 
   if !(conf.tcp.enabled || conf.ws.enabled) {
-    logger::fatal!("No protocols enabled!");
+    fatal!("No protocols enabled!");
   }
 
   // SET UP TLS ACCEPTOR
 
   if conf.tcp.tls || conf.ws.tls {
     if conf.tls.is_none() {
-      logger::fatal!("TLS enabled for one or more protocols, but no TLS config provided!");
+      fatal!("TLS enabled for one or more protocols, but no TLS config provided!");
     }
 
     let tls = conf.tls.as_ref().unwrap();

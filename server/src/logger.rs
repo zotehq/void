@@ -1,7 +1,7 @@
 pub use log::{debug, error, info, log, trace, warn, Level};
 
 pub fn init() {
-  let conf = config::get();
+  let conf = crate::config::get();
   if std::env::var("RUST_LOG").is_err() {
     if let Some(ref log_level) = conf.log_level {
       std::env::set_var("RUST_LOG", log_level.as_str());
@@ -31,5 +31,3 @@ macro_rules! fatal {
 }
 
 pub use fatal;
-
-use crate::config;

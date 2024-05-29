@@ -33,8 +33,8 @@ impl<S: RawStream> Connection for TcpConnection<S> {
       }
     };
 
-    let request = wrap_malformed_req!(String::from_utf8(request));
+    let request = check_req!(String::from_utf8(request));
     let request = request.trim_end_matches('\0').trim();
-    Ok(wrap_malformed_req!(Request::from_str(request)))
+    Ok(check_req!(Request::from_str(request)))
   }
 }

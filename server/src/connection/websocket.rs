@@ -9,13 +9,10 @@ use futures_util::{
 use tokio_tungstenite::{
   accept_async_with_config,
   tungstenite::{protocol::WebSocketConfig, Error as WsError, Message},
-  WebSocketStream,
+  WebSocketStream as Stream,
 };
 
-pub struct WebSocketConnection<S: RawStream>(
-  SplitSink<WebSocketStream<S>, Message>,
-  SplitStream<WebSocketStream<S>>,
-);
+pub struct WebSocketConnection<S: RawStream>(SplitSink<Stream<S>, Message>, SplitStream<Stream<S>>);
 
 impl<S: RawStream> WebSocketConnection<S> {
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
@@ -29,14 +26,14 @@ impl<S: RawStream> WebSocketConnection<S> {
     Ok(Self(write, read))
   }
 
-  async fn write(&mut self, msg: Message) -> Result<(), Error> {
+  async fn send_msg(&mut self, msg: Message) -> Result<(), Error> {
     match self.0.send(msg).await {
+      Ok(_) => Ok(()),
       Err(e) => Err(Error::IoError(match e {
         WsError::Io(e) => e,
-        WsError::Utf8 => IoError::from(IoErrorKind::InvalidData),
-        _ => IoError::from(IoErrorKind::Other),
+        WsError::Utf8 => IoErrorKind::InvalidData.into(),
+        _ => IoErrorKind::Other.into(),
       })),
-      Ok(_) => Ok(()),
     }
   }
 }
@@ -45,21 +42,20 @@ impl<S: RawStream> WebSocketConnection<S> {
 impl<S: RawStream> Connection for WebSocketConnection<S> {
   #[inline]
   async fn send(&mut self, res: Response) -> Result<(), Error> {
-    if let Payload::Pong(bytes) = res.payload.as_ref().unwrap() {
-      self.write(Message::Pong(bytes.clone())).await
-    } else {
-      self.write(Message::Text(res.to_string())).await
+    match res.status {
+      Pong => Ok(()), // tungstenite sends pongs automatically, don't send
+      _ => self.send_msg(Message::Text(res.to_string())).await,
     }
   }
 
   async fn recv(&mut self) -> Result<Request, Error> {
     match self.1.next().await {
       None => Err(Error::Closed),
-      Some(msg) => match wrap_malformed_req!(msg) {
-        Message::Text(s) => Ok(wrap_malformed_req!(Request::from_str(s.trim()))),
+      Some(msg) => match check_req!(msg) {
+        Message::Text(s) => Ok(check_req!(Request::from_str(s.trim()))),
         Message::Binary(b) => {
-          let request = wrap_malformed_req!(String::from_utf8(b));
-          Ok(wrap_malformed_req!(Request::from_str(request.trim())))
+          let request = check_req!(String::from_utf8(b));
+          Ok(check_req!(Request::from_str(request.trim())))
         }
         // WebSocket spec forces payload to be <=125 bytes, don't check
         Message::Ping(payload) => Ok(Request::Ping { payload }),

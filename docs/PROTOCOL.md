@@ -6,22 +6,29 @@ JSON is used for messaging to keep the protocol simple.
 
 ## Custom Types
 
-- `PrimitiveValue`: `int64 | uint64 | float64 | string | boolean`
-- `MapData`: `{ "key": string, "value": PrimitiveValue, "expires_in": uint64 | null }`
-
-  - `expires_in` is in seconds. If null, the data will never expire
-
 - `PingPongPayload`: `string`
 
   - `PingPongPayload` is a `string`, but with two important limitations
   - It must be valid base64, and the underlying data must NOT be over 125 bytes
   - Size limit matches the WebSocket ping/pong message size limit for ease of implementation
 
+- `PrimitiveValue`: `int64 | uint64 | float64 | string | boolean`
+- `InsertTableValue`: `{ "value": PrimitiveValue, "lifetime": uint64 | null }`
+
+  - `lifetime` is seconds from the current time. If null, the data will never expire
+
+- `TableValue`: `{ "value": PrimitiveValue, "expiry": uint64 | null }`
+
+  - `expiry` is seconds from the Unix epoch. If null, the data will never expire
+
+- `InsertTable`: `{ (...keys): InsertTableValue }`
+- `Table`: `{ (...keys): TableValue }`
+
 ## Responses
 
-All responses follow this structure: `{ "status": string | null, "payload": MapData | PingPongPayload | null }`
+All responses follow this structure: `{ "status": string, (...data) }`
 
-### `status`
+### Statuses
 
 - `OK`: Operation succeeded with zero errors
 - `Too many connections`: Server reached its connection limit
@@ -33,26 +40,36 @@ All responses follow this structure: `{ "status": string | null, "payload": MapD
 
 - `Authentication required`: `AUTH` is required for this operation
 - `Invalid credentials`: `AUTH` was attempted with invalid credentials
-- `Already authenticated`: `AUTH` was attempted after earlier successful AUTH
+- `Already authenticated`: `AUTH` was attempted after earlier successful `AUTH`
 
-- `Key expired`: `GET` was attempted on an expired key
-- `No such key`: `GET` was attempted on a non-existent key
+- `Already exists`: Tried to create table or key which already exists
+- `No such table`: Operation was attempted on a non-existent table
+- `No such key`: Operation was attempted on a non-existent key
+- `Key expired`: Operation was attempted on an expired key
 
 ## Requests
 
-All requests follow this structure: `{ "action": string, ...(data) }`  
-`action` can be either `PING`, `AUTH`, `GET`, `DELETE`, or `SET`
+All requests follow this structure: `{ "action": string, (...data) }`
 
-### `data`
+### Actions
 
-- When `action` is `PING`, `"payload": PingPongPayload` is expected
+#### Unauthorized
 
-  - The server will send back a `Pong!` status with the same `payload`
+| Action(s) | Request Data                             | Server Data (on success) |
+| --------- | ---------------------------------------- | ------------------------ |
+| `PING`    | `"payload": PingPongPayload`             | (mirrored)               |
+| `AUTH`    | `"username": string, "password": string` | ...                      |
 
-- When `action` is `AUTH`, `"username": string, "password": string` is expected
+#### Privileged
 
-  - `AUTH` is required before _any_ other operation or they will fail
-
-- When `action` is `GET` or `DELETE`, `"key": string` is expected
-
-- When `action` is `SET`, inline `MapData` is expected
+| Action(s)      | Request Data                                               | Server Data (on success) |
+| -------------- | ---------------------------------------------------------- | ------------------------ |
+| `LIST TABLE`   | ...                                                        | `"tables": [string]`     |
+| `INSERT TABLE` | `"table": string, "contents": InsertTable \| null`         | ...                      |
+| `GET TABLE`    | `"table": string`                                          | `Table`                  |
+| `DELETE TABLE` | `"table": string`                                          | ...                      |
+|                |                                                            |                          |
+| `LIST`         | `"table": string`                                          | `"keys": [string]`       |
+| `INSERT`       | `"table": string, "key": string, "item": InsertTableValue` | ...                      |
+| `GET`          | `"table": string, "key": string`                           | `TableValue`             |
+| `DELETE`       | `"table": string, "key": string`                           | ...                      |

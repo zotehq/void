@@ -3,21 +3,13 @@ pub mod connection;
 pub mod logger;
 pub mod server;
 
-#[cfg(feature = "gxhash")]
-use gxhash::GxBuildHasher;
-use protocol::primitive_value::PrimitiveValue;
+use protocol::*;
 use rmp_serde::{from_read, to_vec};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use scc::HashIndex;
 use std::fs::{metadata, File};
 use std::io::Write;
 use std::sync::OnceLock;
-use std::time::SystemTime;
-use tokio::{
-  signal,
-  sync::RwLock,
-  time::{sleep, Duration},
-};
+use tokio::time::{sleep, Duration};
 
 // HELPERS
 
@@ -33,28 +25,15 @@ macro_rules! wrap_fatal {
   };
 }
 
-// THE MAP ITSELF
+// THE DB ITSELF
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MapValue {
-  value: PrimitiveValue,
-  // calculated from "expires_in" if specified when SET
-  // if GET is attempted and current timestamp is past this, remove key and return error
-  // if not, calculate difference and set "expires_in" in response
-  expiry: Option<SystemTime>,
-}
+type Database = HashIndex<String, Table, Hasher>;
 
-#[cfg(feature = "gxhash")]
-type Map = HashMap<String, MapValue, GxBuildHasher>;
-#[cfg(not(feature = "gxhash"))]
-type Map = HashMap<String, MapValue>;
+pub static DB: OnceLock<Database> = OnceLock::new();
 
-pub static MAP: OnceLock<RwLock<Map>> = OnceLock::new();
-
-async fn save_map() {
-  let map = MAP.get().unwrap().read().await;
-  let bytes = wrap_fatal!(to_vec(&*map), "Failed to serialize database: {}");
-  drop(map); // drop ASAP we don't need this lock anymore
+async fn save_db() {
+  let db = DB.get().unwrap();
+  let bytes = wrap_fatal!(to_vec(db), "Failed to serialize database: {}");
   let mut file = wrap_fatal!(File::create("db.void"), "Failed to create db.void: {}");
   wrap_fatal!(file.write_all(&bytes), "Failed to write to db.void: {}");
 }
@@ -72,12 +51,12 @@ async fn main() {
 
   if db_found {
     let file = wrap_fatal!(File::open("db.void"), "Failed to load db.void: {}");
-    let map = wrap_fatal!(from_read(file), "Failed to parse db.void: {}");
-    MAP.set(RwLock::new(map)).unwrap();
+    let db = wrap_fatal!(from_read(file), "Failed to parse db.void: {}");
+    DB.set(db).unwrap();
   } else {
     logger::info!("db.void not found, creating...");
-    MAP.set(RwLock::new(Map::default())).unwrap();
-    save_map().await;
+    DB.set(Database::default()).unwrap();
+    save_db().await;
   }
 
   // spawn listeners & autosaver
@@ -88,17 +67,17 @@ async fn main() {
     loop {
       sleep(duration).await;
       logger::info!("Autosaving...");
-      save_map().await;
+      save_db().await;
       logger::info!("Save complete.");
     }
   });
 
   // handle signals
 
-  match signal::ctrl_c().await {
+  match tokio::signal::ctrl_c().await {
     Ok(()) => {
       logger::info!("SIGINT detected, saving...");
-      save_map().await;
+      save_db().await;
     }
     Err(e) => logger::error!("Failed to listen for shutdown signal: {}", e),
   }

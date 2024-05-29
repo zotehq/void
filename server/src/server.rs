@@ -1,7 +1,7 @@
-use crate::{config, connection::*, logger::*, wrap_fatal};
+use crate::{config, connection::*, logger::*, util::Global, wrap_fatal};
 use protocol::{Response, Status::ConnLimit};
-use std::sync::{atomic::Ordering::*, Arc, OnceLock};
-use tokio::{join, net::TcpListener};
+use std::sync::{atomic::Ordering::*, Arc};
+use tokio::net::TcpListener;
 use tokio_native_tls::{native_tls, TlsAcceptor as AsyncTlsAcceptor};
 
 // IMPLEMENTATION HELPERS
@@ -42,7 +42,7 @@ async fn conn_handoff(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
 #[macro_export]
 macro_rules! listener {
   ($protocol:expr, $addr:expr, $tls:expr, $max_conns:expr) => {
-    async {
+    async move {
       let listener = match TcpListener::bind($addr.clone()).await {
         Ok(l) => l,
         Err(e) => {
@@ -56,36 +56,40 @@ macro_rules! listener {
         let stream = match listener.accept().await {
           Err(e) => {
             error!("Connection failed: {}", e);
-            continue;
+            return;
+            //continue;
           }
           Ok((s, _)) => s,
         };
 
-        // unfortunately TcpStream and TlsStream are different types
-        // we can't overwrite `stream` for TLS and convert it generically
-        // convert the two stream types separately and store in conn
-        let conn = if $tls {
-          let stream = match TLS_ACCEPTOR.get().unwrap().accept(stream).await {
-            Err(e) => {
-              error!("Failed to accept TLS handshake: {}", e);
-              continue;
-            }
-            Ok(s) => s,
+        tokio::spawn(async {
+          // unfortunately TcpStream and TlsStream are different types
+          // we can't overwrite `stream` for TLS and convert it generically
+          // convert the two stream types separately and store in conn
+          let conn = if $tls {
+            let stream = match TLS_ACCEPTOR.accept(stream).await {
+              Err(e) => {
+                error!("Failed to accept TLS handshake: {}", e);
+                return;
+                //continue;
+              }
+              Ok(s) => s,
+            };
+            convert_stream(stream, $protocol).await
+          } else {
+            convert_stream(stream, $protocol).await
           };
-          convert_stream(stream, $protocol).await
-        } else {
-          convert_stream(stream, $protocol).await
-        };
 
-        // hand control off to connection handler
-        // only accept if we're below connection limit
-        tokio::spawn(conn_handoff(conn, CURRENT_CONNS.load(SeqCst) < $max_conns));
+          // hand control off to connection handler
+          // only accept if we're below connection limit
+          conn_handoff(conn, CURRENT_CONNS.load(SeqCst) < $max_conns).await;
+        });
       }
     }
   };
 }
 
-pub static TLS_ACCEPTOR: OnceLock<AsyncTlsAcceptor> = OnceLock::new();
+pub static TLS_ACCEPTOR: Global<AsyncTlsAcceptor> = Global::new();
 
 // SET UP LISTENERS
 
@@ -114,17 +118,15 @@ pub async fn listen() {
       native_tls::TlsAcceptor::new(identity),
       "Failed to create TLS acceptor: {}"
     );
-    let _ = TLS_ACCEPTOR.set(acceptor.into());
+    TLS_ACCEPTOR.set(acceptor.into());
   }
 
   // START LISTENING FOR CONNECTIONS
 
   MAX_BODY_SIZE.store(conf.max_body_size, Relaxed);
 
-  let mut futures = (None, None);
-
   if conf.tcp.enabled {
-    futures.0 = Some(listener!(
+    tokio::spawn(listener!(
       "TCP",
       &format!("{}:{}", conf.tcp.address, conf.tcp.port),
       conf.tcp.tls,
@@ -133,21 +135,11 @@ pub async fn listen() {
   }
 
   if conf.ws.enabled {
-    futures.1 = Some(listener!(
+    tokio::spawn(listener!(
       "WebSocket",
       &format!("{}:{}", conf.ws.address, conf.ws.port),
       conf.ws.tls,
       conf.max_conns
     ));
-  }
-
-  if conf.ws.enabled {
-    if conf.tcp.enabled {
-      join!(futures.0.unwrap(), futures.1.unwrap());
-    } else {
-      futures.1.unwrap().await;
-    }
-  } else {
-    futures.0.unwrap().await;
   }
 }

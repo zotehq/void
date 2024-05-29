@@ -8,18 +8,19 @@ serde = { version = "1.0", default-features = false, features = ["derive"] }
 toml = "0.8"
 env_logger = "0.11"
 log = { version = "0.4", features = ["serde"] }
-tokio = { version = "1", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "time", "macros", "signal", "fs"] }
+tokio-stream = "0.1"
 tokio-native-tls = "0.3"
 tokio-tungstenite = "0.21"
 async-trait = "0.1"
 futures-util = "0.3"
 rmp-serde = "1.3"
-scc = { version = "2.1.1", features = ["serde"] }
+gxhash = { version = "3", optional = true }
+scc = { version = "2.1", features = ["serde"] }
 
 protocol = { path = "../protocol" }
 
 [features]
 # optionally use extremely fast gxhash hashing algo
 # requires some CPU features, only works on x86_64 and aarch64
-gxhash = ["protocol/gxhash"]
+gxhash = ["dep:gxhash"]

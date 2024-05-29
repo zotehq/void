@@ -3,39 +3,30 @@ pub mod connection;
 pub mod logger;
 pub mod server;
 
+mod util;
+pub use util::*;
+
 use protocol::*;
+
 use rmp_serde::{from_read, to_vec};
-use scc::HashIndex;
-use std::fs::{metadata, File};
-use std::io::Write;
-use std::sync::OnceLock;
-use tokio::time::{sleep, Duration};
+use scc::HashMap;
+use std::fs::File as SyncFile;
+use tokio::{
+  fs::{metadata, File},
+  io::AsyncWriteExt,
+  time::{sleep, Duration},
+};
 
-// HELPERS
+// THE DATABASE ITSELF
 
-#[macro_export]
-macro_rules! wrap_fatal {
-  ($in:expr, $fmt:expr) => {
-    match $in {
-      Ok(o) => o,
-      Err(e) => {
-        $crate::logger::fatal!($fmt, e);
-      }
-    }
-  };
-}
+type Database = HashMap<String, Table, Hasher>;
 
-// THE DB ITSELF
-
-type Database = HashIndex<String, Table, Hasher>;
-
-pub static DB: OnceLock<Database> = OnceLock::new();
+pub static DATABASE: Global<Database> = Global::new();
 
 async fn save_db() {
-  let db = DB.get().unwrap();
-  let bytes = wrap_fatal!(to_vec(db), "Failed to serialize database: {}");
-  let mut file = wrap_fatal!(File::create("db.void"), "Failed to create db.void: {}");
-  wrap_fatal!(file.write_all(&bytes), "Failed to write to db.void: {}");
+  let bytes = wrap_fatal!(to_vec(&*DATABASE), "Failed to serialize database: {}");
+  let mut file = wrap_fatal!(File::create("db.void").await, "Failed to open database: {}");
+  wrap_fatal!(file.write_all(&bytes).await, "Failed to write database: {}");
 }
 
 #[tokio::main]
@@ -45,17 +36,17 @@ async fn main() {
   // load database file
 
   let mut db_found = false;
-  if let Ok(m) = metadata("db.void") {
+  if let Ok(m) = metadata("db.void").await {
     db_found = m.is_file();
   }
 
   if db_found {
-    let file = wrap_fatal!(File::open("db.void"), "Failed to load db.void: {}");
-    let db = wrap_fatal!(from_read(file), "Failed to parse db.void: {}");
-    DB.set(db).unwrap();
+    let file = wrap_fatal!(SyncFile::open("db.void"), "Failed to open database: {}");
+    let db = wrap_fatal!(from_read(file), "Failed to parse database: {}");
+    DATABASE.set(db);
   } else {
     logger::info!("db.void not found, creating...");
-    DB.set(Database::default()).unwrap();
+    DATABASE.set(Database::default());
     save_db().await;
   }
 

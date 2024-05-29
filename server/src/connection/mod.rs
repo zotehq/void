@@ -3,14 +3,14 @@ mod websocket;
 pub use tcp::*;
 pub use websocket::*;
 
-use crate::{config, logger::*, TableValue, DB};
+use crate::{config, logger::*, TableValue, DATABASE};
 use protocol::*;
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, SystemTime};
 use std::{fmt, io::Error as IoError, str::FromStr};
 
-use scc::hash_index::Entry;
+use scc::hash_map::Entry;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 // CONNECTION TRAIT
@@ -33,7 +33,7 @@ impl fmt::Display for Error {
 }
 
 #[async_trait::async_trait]
-pub trait Connection: Send + Sync + Unpin {
+pub trait Connection: Send + Sync + Unpin + 'static {
   async fn send(&mut self, res: Response) -> Result<(), Error>;
   async fn recv(&mut self) -> Result<Request, Error>;
 }
@@ -109,7 +109,7 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
 
     match request {
       Request::Ping { payload } => {
-        trace!("PING received | payload: {:?}", payload);
+        trace!("PING requested | payload: {:?}", payload);
         send!(conn, Response::payload(Pong, Payload::Pong { payload }))
       }
 
@@ -131,10 +131,9 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::ListTables if authenticated => {
-        trace!("LIST TABLE received");
-        let db = DB.get().unwrap();
-        let mut tables = Vec::<String>::with_capacity(db.len());
-        let mut entry = db.first_entry_async().await;
+        trace!("LIST TABLE requested");
+        let mut tables = Vec::<String>::with_capacity(DATABASE.len());
+        let mut entry = DATABASE.first_entry_async().await;
         while let Some(e) = &entry {
           tables.push(e.key().clone());
           entry = entry.unwrap().next_async().await;
@@ -143,8 +142,8 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::InsertTable { table, contents } if authenticated => {
-        trace!("INSERT TABLE received | table: {}", table);
-        if let Entry::Vacant(entry) = DB.get().unwrap().entry_async(table).await {
+        trace!("INSERT TABLE requested | table: {}", table);
+        if let Entry::Vacant(entry) = DATABASE.entry_async(table).await {
           let tbl = crate::Table::default();
           if let Some(prot_tbl) = contents {
             // build Table from InsertTable
@@ -153,7 +152,7 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
               let key = e.key().clone();
               let InsertTableValue { value, lifetime } = e.get().clone();
               let expiry = lifetime.map(|exp| SystemTime::now() + Duration::from_secs(exp));
-              _ = tbl.insert_async(key, TableValue { value, expiry }).await;
+              let _ = tbl.insert_async(key, TableValue { value, expiry }).await;
               entry = entry.unwrap().next_async().await;
             }
           }
@@ -165,8 +164,8 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::GetTable { table } if authenticated => {
-        trace!("GET TABLE received | table: {}", table);
-        if let Some(table) = DB.get().unwrap().get_async(&table).await {
+        trace!("GET TABLE requested | table: {}", table);
+        if let Some(table) = DATABASE.get_async(&table).await {
           let table = table.clone();
           let payload = Payload::Table { table };
           send!(conn, Response::ok(payload));
@@ -176,15 +175,14 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::DeleteTable { table } if authenticated => {
-        trace!("DELETE TABLE received | table: {}", table);
-        _ = DB.get().unwrap().remove_async(&table).await;
+        trace!("DELETE TABLE requested | table: {}", table);
+        let _ = DATABASE.remove_async(&table).await;
         send!(conn, Response::OK);
       }
 
       Request::List { table } if authenticated => {
-        trace!("LIST received | table: {}", table);
-        let db = DB.get().unwrap();
-        if let Some(tbl) = db.get_async(&table).await {
+        trace!("LIST requested | table: {}", table);
+        if let Some(tbl) = DATABASE.get_async(&table).await {
           let mut tables = Vec::<String>::with_capacity(tbl.len());
           let mut entry = tbl.first_entry_async().await;
           while let Some(e) = &entry {
@@ -198,11 +196,11 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::Get { table, key } if authenticated => {
-        trace!("GET received | table: {}, key: {}", table, key);
-        if let Some(tbl) = DB.get().unwrap().get_async(&table).await {
+        trace!("GET requested | table: {}, key: {}", table, key);
+        if let Some(tbl) = DATABASE.get_async(&table).await {
           if let Some(value) = tbl.get_async(&key).await {
             if value.expiry.is_some_and(|st| st <= SystemTime::now()) {
-              value.remove_entry();
+              let _ = value.remove();
               send!(conn, Response::status(KeyExpired));
             } else {
               let value = value.clone();
@@ -218,16 +216,16 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::Delete { table, key } if authenticated => {
-        trace!("DELETE received | table: {}, key: {}", table, key);
-        if let Some(table) = DB.get().unwrap().get_async(&table).await {
-          _ = table.remove_async(&key).await;
+        trace!("DELETE requested | table: {}, key: {}", table, key);
+        if let Some(table) = DATABASE.get_async(&table).await {
+          let _ = table.remove_async(&key).await;
         }
         send!(conn, Response::OK);
       }
 
       Request::Insert { table, key, value } if authenticated => {
-        trace!("INSERT received | table: {}, key: {}", table, key);
-        if let Some(table) = DB.get().unwrap().get_async(&table).await {
+        trace!("INSERT requested | table: {}, key: {}", table, key);
+        if let Some(table) = DATABASE.get_async(&table).await {
           if let Entry::Vacant(entry) = table.entry_async(key).await {
             let InsertTableValue { value, lifetime } = value;
             let expiry = lifetime.map(|exp| SystemTime::now() + Duration::from_secs(exp));

@@ -1,5 +1,6 @@
-use scc::HashIndex;
+use scc::HashMap;
 use serde::{ser::Error as _, Deserialize, Deserializer, Serialize, Serializer};
+use std::collections::hash_map::RandomState;
 use std::time::{Duration, SystemTime};
 
 // SERDE HELPERS
@@ -8,9 +9,8 @@ pub(crate) fn from_unix<'de, D>(deserializer: D) -> Result<Option<SystemTime>, D
 where
   D: Deserializer<'de>,
 {
-  let secs: Option<u64> = Deserialize::deserialize(deserializer)?;
-  if let Some(s) = secs {
-    Ok(Some(SystemTime::UNIX_EPOCH + Duration::from_secs(s)))
+  if let Some(secs) = Deserialize::deserialize(deserializer)? {
+    Ok(Some(SystemTime::UNIX_EPOCH + Duration::from_secs(secs)))
   } else {
     Ok(None)
   }
@@ -21,11 +21,11 @@ where
   S: Serializer,
 {
   if let Some(st) = x {
-    let secs = st
-      .duration_since(SystemTime::UNIX_EPOCH)
-      .map_err(S::Error::custom)?
-      .as_secs();
-    serializer.serialize_some(&Some(secs))
+    serializer.serialize_some(&Some(
+      st.duration_since(SystemTime::UNIX_EPOCH)
+        .map_err(S::Error::custom)?
+        .as_secs(),
+    ))
   } else {
     serializer.serialize_none()
   }
@@ -41,6 +41,7 @@ pub enum PrimitiveValue {
   Uint(u64),
   Float(f64),
   Boolean(bool),
+  Array(Vec<PrimitiveValue>),
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -58,10 +59,5 @@ pub struct TableValue {
   pub expiry: Option<SystemTime>,
 }
 
-#[cfg(feature = "gxhash")]
-pub type Hasher = gxhash::GxBuildHasher;
-#[cfg(not(feature = "gxhash"))]
-pub type Hasher = std::collections::hash_map::RandomState;
-
-pub type InsertTable = HashIndex<String, InsertTableValue, Hasher>;
-pub type Table = HashIndex<String, TableValue, Hasher>;
+pub type InsertTable<S = RandomState> = HashMap<String, InsertTableValue, S>;
+pub type Table<S = RandomState> = HashMap<String, TableValue, S>;

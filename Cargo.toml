@@ -6,3 +6,5 @@ members = [ "client", "protocol",
 
 [profile.release]
 strip = "symbols"
+opt-level = 2
+

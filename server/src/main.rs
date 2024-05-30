@@ -115,7 +115,7 @@ In memory key-value fault tolerant cache built to handle millions of requests.
 
   if let Ok(m) = metadata(&*DB_PATH).await {
     if m.is_file() {
-      let file = wrap_fatal!(SyncFile::open("db.void"), "Failed to open database: {}");
+      let file = wrap_fatal!(SyncFile::open(&*DB_PATH), "Failed to open database: {}");
       let db = wrap_fatal!(from_read(file), "Failed to parse database: {}");
       DATABASE.set(db);
     } else {

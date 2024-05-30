@@ -22,18 +22,17 @@ impl<S: RawStream> Connection for TcpConnection<S> {
   }
 
   async fn recv(&mut self) -> Result<Request, Error> {
-    let mut request: Vec<u8> = vec![0; self.1];
+    let mut req: Vec<u8> = vec![0; self.1];
 
-    match self.0.read(&mut request).await {
+    match self.0.read(&mut req).await {
       Ok(0) => return Err(Error::Closed),
-      Ok(amt) => request.shrink_to(amt),
+      Ok(amt) => req.truncate(amt),
       Err(e) => {
         return Err(Error::IoError(e));
       }
     };
 
-    let request = check_req!(String::from_utf8(request));
-    let request = request.trim_end_matches('\0').trim();
-    Ok(check_req!(Request::from_str(request)))
+    let req = check_req!(std::str::from_utf8(&req));
+    Ok(check_req!(Request::from_str(req)))
   }
 }

@@ -53,10 +53,7 @@ impl<S: RawStream> Connection for WebSocketConnection<S> {
       None => Err(Error::Closed),
       Some(msg) => match check_req!(msg) {
         Message::Text(s) => Ok(check_req!(Request::from_str(s.trim()))),
-        Message::Binary(b) => {
-          let request = check_req!(String::from_utf8(b));
-          Ok(check_req!(Request::from_str(request.trim())))
-        }
+        Message::Binary(b) => Ok(check_req!(Request::from_bytes(&b))),
         // WebSocket spec forces payload to be <=125 bytes, don't check
         Message::Ping(payload) => Ok(Request::Ping { payload }),
         Message::Close(_) => Err(Error::Closed),

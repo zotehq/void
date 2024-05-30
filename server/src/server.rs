@@ -56,8 +56,7 @@ macro_rules! listener {
         let stream = match listener.accept().await {
           Err(e) => {
             error!("Connection failed: {}", e);
-            return;
-            //continue;
+            continue;
           }
           Ok((s, _)) => s,
         };
@@ -112,11 +111,11 @@ pub async fn listen() {
     let key = wrap_fatal!(std::fs::read(&tls.key), "Failed to parse TLS key: {}");
     let identity = wrap_fatal!(
       native_tls::Identity::from_pkcs8(&cert, &key),
-      "Failed to create TLS identity: {}"
+      "Failed to build TLS identity: {}"
     );
     let acceptor = wrap_fatal!(
       native_tls::TlsAcceptor::new(identity),
-      "Failed to create TLS acceptor: {}"
+      "Failed to build TLS acceptor: {}"
     );
     TLS_ACCEPTOR.set(acceptor.into());
   }

@@ -68,6 +68,11 @@ pub enum Payload {
 }
 
 impl Response {
+  #[inline]
+  pub fn to_byte_vec(&self) -> Vec<u8> {
+    serde_json::to_vec(self).unwrap()
+  }
+
   // OK is common
 
   pub const OK: Self = Self {

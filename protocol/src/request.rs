@@ -52,6 +52,13 @@ pub enum Request {
   },
 }
 
+impl Request {
+  #[inline]
+  pub fn to_byte_vec(&self) -> Vec<u8> {
+    serde_json::to_vec(self).unwrap()
+  }
+}
+
 impl fmt::Display for Request {
   fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
     match serde_json::to_string(self) {

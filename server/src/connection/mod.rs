@@ -3,7 +3,7 @@ mod websocket;
 pub use tcp::*;
 pub use websocket::*;
 
-use crate::{config, logger::*, TableValue, DATABASE};
+use crate::{config::CONFIG, logger::*, TableValue, DATABASE};
 use protocol::*;
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
@@ -40,9 +40,6 @@ pub trait Connection: Send + Sync + Unpin + 'static {
 
 // CONNECTION TRAIT IMPLEMENTATION HELPERS
 
-// should be faster than running config::get() all the time
-pub static MAX_BODY_SIZE: AtomicUsize = AtomicUsize::new(0);
-
 pub trait RawStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
 impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S {}
 
@@ -64,7 +61,7 @@ pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
 
 pub fn fmt_conns() -> String {
   let current_conns = CURRENT_CONNS.load(SeqCst);
-  let max_conns = config::get().max_conns;
+  let max_conns = CONFIG.max_conns;
 
   format!(
     "({current_conns} {} / {max_conns} max)",
@@ -119,7 +116,7 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       }
 
       Request::Auth { username, password } => {
-        let conf = config::get();
+        let conf = &*CONFIG;
         if username == conf.username && password == conf.password {
           authenticated = true;
           trace!("AUTH succeeded");

@@ -1,6 +1,6 @@
 use super::*;
 
-use std::{io::ErrorKind as IoErrorKind, sync::atomic::Ordering::Relaxed};
+use std::io::ErrorKind as IoErrorKind;
 
 use futures_util::{
   stream::{SplitSink, SplitStream, StreamExt},
@@ -17,7 +17,7 @@ pub struct WebSocketConnection<S: RawStream>(SplitSink<Stream<S>, Message>, Spli
 impl<S: RawStream> WebSocketConnection<S> {
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
     let cfg = WebSocketConfig {
-      max_message_size: Some(MAX_BODY_SIZE.load(Relaxed)),
+      max_message_size: Some(CONFIG.max_body_size),
       ..Default::default()
     };
 

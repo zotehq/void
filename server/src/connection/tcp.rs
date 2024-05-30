@@ -1,6 +1,5 @@
 use super::*;
 
-use std::sync::atomic::Ordering::Relaxed;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 // store max_body_size here too since its stored in the WebSocketConfig
@@ -8,7 +7,7 @@ pub struct TcpConnection<S: RawStream>(S, usize);
 
 impl<S: RawStream> From<S> for TcpConnection<S> {
   fn from(value: S) -> Self {
-    Self(value, MAX_BODY_SIZE.load(Relaxed))
+    Self(value, CONFIG.max_body_size)
   }
 }
 

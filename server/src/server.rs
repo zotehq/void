@@ -1,6 +1,6 @@
-use crate::{config, connection::*, logger::*, util::Global, wrap_fatal};
+use crate::{config::CONFIG, connection::*, logger::*, util::Global, wrap_fatal};
 use protocol::{Response, Status::ConnLimit};
-use std::sync::{atomic::Ordering::*, Arc};
+use std::sync::{atomic::Ordering::SeqCst, Arc};
 use tokio::net::TcpListener;
 use tokio_native_tls::{native_tls, TlsAcceptor as AsyncTlsAcceptor};
 
@@ -94,7 +94,7 @@ pub static TLS_ACCEPTOR: Global<AsyncTlsAcceptor> = Global::new();
 // SET UP LISTENERS
 
 pub async fn listen() {
-  let conf = config::get();
+  let conf = &*CONFIG;
 
   if !(conf.tcp.enabled || conf.ws.enabled) {
     fatal!("No protocols enabled!");
@@ -122,8 +122,6 @@ pub async fn listen() {
   }
 
   // START LISTENING FOR CONNECTIONS
-
-  MAX_BODY_SIZE.store(conf.max_body_size, Relaxed);
 
   if conf.tcp.enabled {
     tokio::spawn(listener!(

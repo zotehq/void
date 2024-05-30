@@ -16,7 +16,7 @@ where
   D: Deserializer<'de>,
 {
   let s: &str = Deserialize::deserialize(deserializer)?;
-  if s.len() > 18 {
+  if s.len() > 168 {
     // exit early so we don't waste time decoding
     return Err(D::Error::custom("Ping payload over 125 bytes"));
   }

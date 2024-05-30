@@ -24,6 +24,15 @@ use tokio::{
 use std::fs::{create_dir_all, read_to_string, File as SyncFile};
 use std::path::PathBuf;
 
+// USE JEMALLOC
+
+#[cfg(not(target_env = "msvc"))]
+use tikv_jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
 // THE DATABASE ITSELF
 
 pub type Database = HashMap<String, Table, Hasher>;

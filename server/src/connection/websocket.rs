@@ -6,13 +6,18 @@ use futures_util::{
   stream::{SplitSink, SplitStream, StreamExt},
   SinkExt,
 };
+use simd_json::serde::{from_slice_with_buffers as from_bytes, from_str_with_buffers as from_str};
 use tokio_tungstenite::{
   accept_async_with_config,
   tungstenite::{protocol::WebSocketConfig, Error as WsError, Message},
   WebSocketStream as Stream,
 };
 
-pub struct WebSocketConnection<S: RawStream>(SplitSink<Stream<S>, Message>, SplitStream<Stream<S>>);
+pub struct WebSocketConnection<S: RawStream>(
+  SplitSink<Stream<S>, Message>,
+  SplitStream<Stream<S>>,
+  simd_json::Buffers,
+);
 
 impl<S: RawStream> WebSocketConnection<S> {
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
@@ -23,7 +28,7 @@ impl<S: RawStream> WebSocketConnection<S> {
 
     let ws = accept_async_with_config(stream, Some(cfg)).await?;
     let (write, read) = ws.split();
-    Ok(Self(write, read))
+    Ok(Self(write, read, simd_json::Buffers::new(256)))
   }
 
   async fn send_msg(&mut self, msg: Message) -> Result<(), Error> {
@@ -42,20 +47,15 @@ impl<S: RawStream> WebSocketConnection<S> {
 impl<S: RawStream> Connection for WebSocketConnection<S> {
   #[inline]
   async fn send(&mut self, res: Response) -> Result<(), Error> {
-    match res.status {
-      Pong => Ok(()), // tungstenite sends pongs automatically, don't send
-      _ => self.send_msg(Message::Text(res.to_string())).await,
-    }
+    self.send_msg(Message::Text(simd_json::to_string(&res).unwrap())).await
   }
 
   async fn recv(&mut self) -> Result<Request, Error> {
     match self.1.next().await {
       None => Err(Error::Closed),
       Some(msg) => match check_req!(msg) {
-        Message::Text(s) => Ok(check_req!(Request::from_str(s.trim()))),
-        Message::Binary(b) => Ok(check_req!(Request::from_bytes(&b))),
-        // WebSocket spec forces payload to be <=125 bytes, don't check
-        Message::Ping(payload) => Ok(Request::Ping { payload }),
+        Message::Text(mut s) => Ok(check_req!(unsafe { from_str(&mut s, &mut self.2) })),
+        Message::Binary(mut b) => Ok(check_req!(from_bytes(&mut b, &mut self.2))),
         Message::Close(_) => Err(Error::Closed),
         _ => Err(Error::BadRequest),
       },

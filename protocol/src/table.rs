@@ -1,4 +1,7 @@
+#[cfg(feature = "scc")]
 use scc::HashMap;
+#[cfg(not(feature = "scc"))]
+use std::collections::HashMap;
 use serde::{ser::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::hash_map::RandomState;
 use std::time::{Duration, SystemTime};
@@ -33,7 +36,7 @@ where
 
 // IMPLEMENTATION
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 #[serde(untagged)]
 pub enum PrimitiveValue {
   String(String),
@@ -44,13 +47,13 @@ pub enum PrimitiveValue {
   Array(Vec<PrimitiveValue>),
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct InsertTableValue {
   pub value: PrimitiveValue,
   pub lifetime: Option<u64>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq)]
 pub struct TableValue {
   pub value: PrimitiveValue,
   // calculated from "lifetime" if specified in an InsertTableValue

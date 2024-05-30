@@ -8,7 +8,7 @@ use protocol::*;
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, SystemTime};
-use std::{fmt, io::Error as IoError, str::FromStr};
+use std::{fmt, io::Error as IoError};
 
 use scc::hash_map::Entry;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -105,9 +105,9 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
     };
 
     match request {
-      Request::Ping { payload } => {
-        trace!("PING requested | payload: {:?}", payload);
-        send!(conn, Response::payload(Pong, Payload::Pong { payload }))
+      Request::Ping => {
+        trace!("PING requested");
+        send!(conn, Response::ok(Payload::Pong));
       }
 
       Request::Auth { .. } if authenticated => {

@@ -6,12 +6,6 @@ JSON is used for messaging to keep the protocol simple.
 
 ## Custom Types
 
-- `PingPongPayload`: `string`
-
-  - `PingPongPayload` is a `string`, but with two important limitations
-  - It must be valid base64, and the underlying data must NOT be over 125 bytes
-  - Size limit matches the WebSocket ping/pong message size limit for ease of implementation
-
 - `PrimitiveValue`: `int64 | uint64 | float64 | string | boolean`
 - `InsertTableValue`: `{ "value": PrimitiveValue, "lifetime": uint64 | null }`
 
@@ -34,10 +28,6 @@ All responses follow this structure: `{ "status": string, (...data) }`
 - `Too many connections`: Server reached its connection limit
 - `Malformed request`: Request was built improperly
 
-- `Pong!`: Pong response to a ping
-
-  - `payload` will be equal to the one sent by the client
-
 - `Authentication required`: `AUTH` is required for this operation
 - `Invalid credentials`: `AUTH` was attempted with invalid credentials
 - `Already authenticated`: `AUTH` was attempted after earlier successful `AUTH`
@@ -57,7 +47,7 @@ All requests follow this structure: `{ "action": string, (...data) }`
 
 | Action(s) | Request Data                             | Server Data (on success) |
 | --------- | ---------------------------------------- | ------------------------ |
-| `PING`    | `"payload": PingPongPayload`             | (mirrored)               |
+| `PING`    | ...                                      | ...                      |
 | `AUTH`    | `"username": string, "password": string` | ...                      |
 
 #### Privileged

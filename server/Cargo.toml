@@ -4,25 +4,36 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-serde = { version = "1.0", default-features = false, features = ["derive"] }
-toml = "0.8"
+# logging
 env_logger = "0.11"
 log = { version = "0.4", features = ["serde"] }
+# async
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "time", "macros", "signal", "fs"] }
 tokio-stream = "0.1"
 tokio-native-tls = "0.3"
 tokio-tungstenite = "0.21"
 async-trait = "0.1"
 futures-util = "0.3"
+# internals
+serde = { version = "1.0", default-features = false, features = ["derive"] }
+toml = "0.8"
 rmp-serde = "1.3"
+simd-json = { version = "0.13", default-features = false, features = ["serde_impl", "swar-number-parsing"]}
 gxhash = { version = "3", optional = true }
 scc = { version = "2.1", features = ["serde"] }
+# command-line arguments
 getargs = "0.5"
 dirs = "5.0"
 
-protocol = { path = "../protocol" }
+protocol = { path = "../protocol", features = ["scc"] }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
 
 [features]
-# optionally use extremely fast gxhash hashing algo
+default = ["gxhash"]
+# use the extremely fast gxhash hashing algorithm internally
 # requires some CPU features, only works on x86_64 and aarch64
 gxhash = ["dep:gxhash"]
+# force runtime feature detection for simd-json
+runtime-detection = ["simd-json/runtime-detection"]

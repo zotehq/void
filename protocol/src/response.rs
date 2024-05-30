@@ -1,8 +1,7 @@
-use crate::{from_b64, to_b64, Table, TableValue};
+use crate::{Table, TableValue};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
   // COMMON
   #[serde(rename = "OK")]
@@ -11,10 +10,6 @@ pub enum Status {
   ConnLimit,
   #[serde(rename = "Malformed request")]
   BadRequest,
-
-  // PING/PONG
-  #[serde(rename = "Pong!")]
-  Pong,
 
   // AUTH
   #[serde(rename = "Authentication required")]
@@ -37,20 +32,17 @@ pub enum Status {
 
 pub use Status::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct Response {
   pub status: Status,
   #[serde(flatten)]
   pub payload: Option<Payload>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)] // we flatten this enum and have unique fields
 pub enum Payload {
-  Pong {
-    #[serde(deserialize_with = "from_b64", serialize_with = "to_b64")]
-    payload: Vec<u8>,
-  },
+  Pong,
   Tables {
     tables: Vec<String>,
   },
@@ -68,16 +60,6 @@ pub enum Payload {
 }
 
 impl Response {
-  #[inline]
-  pub fn to_byte_vec(&self) -> Vec<u8> {
-    serde_json::to_vec(self).unwrap()
-  }
-
-  #[inline]
-  pub fn from_bytes(bytes: &[u8]) -> serde_json::Result<Self> {
-    serde_json::from_slice(bytes)
-  }
-
   // OK is common
 
   pub const OK: Self = Self {
@@ -109,24 +91,5 @@ impl Response {
       status,
       payload: Some(payload),
     }
-  }
-}
-
-impl fmt::Display for Response {
-  fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-    match serde_json::to_string(self) {
-      Ok(s) => {
-        f.write_str(&s)?;
-        Ok(())
-      }
-      Err(_) => Err(fmt::Error),
-    }
-  }
-}
-
-impl std::str::FromStr for Response {
-  type Err = serde_json::Error;
-  fn from_str(s: &str) -> Result<Response, Self::Err> {
-    serde_json::from_str::<Response>(s)
   }
 }

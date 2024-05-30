@@ -15,7 +15,7 @@ impl<S: RawStream> From<S> for TcpConnection<S> {
 impl<S: RawStream> Connection for TcpConnection<S> {
   #[inline]
   async fn send(&mut self, res: Response) -> Result<(), Error> {
-    match self.0.write_all(res.to_string().as_bytes()).await {
+    match self.0.write_all(&res.to_byte_vec()).await {
       Err(e) => Err(Error::IoError(e)),
       Ok(_) => Ok(()),
     }

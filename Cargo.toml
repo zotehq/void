@@ -8,5 +8,3 @@ members = [
 
 [profile.release]
 strip = "symbols"
-opt-level = 2
-

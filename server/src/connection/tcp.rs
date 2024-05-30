@@ -2,7 +2,6 @@ use super::*;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-// store max_body_size here too since its stored in the WebSocketConfig
 pub struct TcpConnection<S: RawStream>(S, Vec<u8>);
 
 impl<S: RawStream> From<S> for TcpConnection<S> {

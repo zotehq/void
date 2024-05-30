@@ -73,6 +73,11 @@ impl Response {
     serde_json::to_vec(self).unwrap()
   }
 
+  #[inline]
+  pub fn from_bytes(bytes: &[u8]) -> serde_json::Result<Self> {
+    serde_json::from_slice(bytes)
+  }
+
   // OK is common
 
   pub const OK: Self = Self {

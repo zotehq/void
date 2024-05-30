@@ -57,6 +57,11 @@ impl Request {
   pub fn to_byte_vec(&self) -> Vec<u8> {
     serde_json::to_vec(self).unwrap()
   }
+
+  #[inline]
+  pub fn from_bytes(bytes: &[u8]) -> serde_json::Result<Self> {
+    serde_json::from_slice(bytes)
+  }
 }
 
 impl fmt::Display for Request {

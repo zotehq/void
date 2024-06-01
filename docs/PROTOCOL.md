@@ -1,9 +1,18 @@
 # Void Protocol Specification
 
-The client initiates a connection by establishing a raw TCP or WebSocket connection with the server and then authenticating.
-Upon successful connection, both the client and server can start exchanging data.
+## Serialization Format
 
-Serialization format depends on the connection protocol. For raw TCP, MessagePack is used, and for WebSocket, JSON is used.
+The underlying structures will be the same regardless of the protocol, but the serialization format will be different.
+
+### TCP
+
+MessagePack is used for serialization, due to fast implementations being available for many languages, and its small size.
+The first 4 bytes of each message will be a 32-bit unsigned integer in little-endian format, which represents the size of the message.
+
+### WebSocket
+
+JSON is used for serialization, due to the fast JSON implementation already available right in the browser, and ease of use.
+The WebSocket server implementation accepts either string or binary messages, but always sends back a string.
 
 ## Custom Types
 

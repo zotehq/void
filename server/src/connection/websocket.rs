@@ -38,7 +38,7 @@ impl<S: RawStream> WebSocketConnection<S> {
 impl<S: RawStream> Connection for WebSocketConnection<S> {
   #[inline]
   async fn send(&mut self, res: Response) -> Result<(), Error> {
-    let string = simd_json::to_string(&res).map_err(|e| Error::ServerError(e.into()))?;
+    let string = check!(srv: simd_json::to_string(&res))?;
     self.0.send(Message::Text(string)).await.map_err(map_err)
   }
 

@@ -53,6 +53,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S 
 macro_rules! check {
   (req: $in:expr) => ( $in.map_err(|e| Error::BadRequest(e.into())) );
   (srv: $in:expr) => ( $in.map_err(|e| Error::ServerError(e.into())) );
+  (io: $in:expr) => ( $in.map_err(Error::IoError) );
 }
 
 pub use check;
@@ -78,35 +79,6 @@ macro_rules! send {
   };
 }
 
-#[inline]
-async fn handle_err(conn: &mut dyn Connection, e: Error) {
-  match e {
-    Error::Closed => {}
-    Error::IoError(ref ioerr) => match ioerr.kind() {
-      IoErrorKind::ConnectionReset
-      | IoErrorKind::ConnectionRefused
-      | IoErrorKind::ConnectionAborted => {} // silently close
-      IoErrorKind::OutOfMemory => {
-        error!("{e}");
-        send!(conn, Response::status(ServerError));
-      }
-      IoErrorKind::InvalidInput => {
-        error!("Internal error (this is a bug!): {ioerr}");
-        send!(conn, Response::status(ServerError));
-      }
-      _ => warn!("{e}"),
-    },
-    Error::BadRequest(_) => {
-      warn!("{e}");
-      send!(conn, Response::status(BadRequest));
-    }
-    Error::ServerError(_) => {
-      error!("{e}");
-      send!(conn, Response::status(ServerError));
-    }
-  }
-}
-
 // CONNECTION HANDLER
 
 pub async fn handle_conn(conn: &mut dyn Connection) {
@@ -118,10 +90,42 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
   loop {
     let request = match conn.recv().await {
       Ok(r) => r,
-      Err(e) => {
-        handle_err(conn, e).await;
-        break;
-      }
+      Err(e) => match e {
+        Error::Closed => break,
+        Error::IoError(ref ioerr) => match ioerr.kind() {
+          IoErrorKind::ConnectionReset
+          | IoErrorKind::ConnectionRefused
+          | IoErrorKind::ConnectionAborted
+          | IoErrorKind::UnexpectedEof => break, // silently close
+          IoErrorKind::OutOfMemory | IoErrorKind::WriteZero => {
+            error!("{e}");
+            send!(conn, Response::status(ServerError));
+            break;
+          }
+          IoErrorKind::InvalidInput => {
+            error!("Internal error (this is a bug!): {ioerr}");
+            send!(conn, Response::status(ServerError));
+            break;
+          }
+          // typically these can be retried
+          IoErrorKind::Interrupted | IoErrorKind::TimedOut => {
+            warn!("{e}");
+            continue;
+          }
+          // TODO: handle more errors, for now just gtfo
+          _ => break,
+        },
+        Error::BadRequest(_) => {
+          warn!("{e}");
+          send!(conn, Response::status(BadRequest));
+          break;
+        }
+        Error::ServerError(_) => {
+          error!("{e}");
+          send!(conn, Response::status(ServerError));
+          break;
+        }
+      },
     };
 
     match request {

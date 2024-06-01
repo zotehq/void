@@ -16,9 +16,9 @@ async-trait = "0.1"
 futures-util = "0.3"
 # internals
 serde = { version = "1.0", default-features = false, features = ["derive"] }
-toml = "0.8"
-rmp-serde = "1.3"
-simd-json = { version = "0.13", default-features = false, features = ["serde_impl", "swar-number-parsing"]}
+toml = "0.8" # config
+rmp-serde = "1.3" # database & raw TCP protocol
+simd-json = { version = "0.13", default-features = false, features = ["serde_impl", "swar-number-parsing"]} # WebSocket & HTTP protocol
 gxhash = { version = "3", optional = true }
 scc = { version = "2.1", features = ["serde"] }
 # command-line arguments

@@ -1,7 +1,7 @@
 use crate::Global;
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct ConnectionConfig {
   pub enabled: bool,
   pub address: String,
@@ -9,13 +9,13 @@ pub struct ConnectionConfig {
   pub tls: bool,
 }
 
-#[derive(Deserialize, Serialize, Default)]
+#[derive(Deserialize, Serialize, Debug, Default)]
 pub struct TlsConfig {
   pub cert: String,
   pub key: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Debug)]
 pub struct Config {
   pub tcp: ConnectionConfig,
   pub ws: ConnectionConfig,

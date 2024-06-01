@@ -1,6 +1,8 @@
 use crate::{Table, TableValue};
 use serde::{Deserialize, Serialize};
 
+// RESPONSE STATUS
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Status {
   // COMMON
@@ -10,14 +12,14 @@ pub enum Status {
   ConnLimit,
   #[serde(rename = "Malformed request")]
   BadRequest,
+  #[serde(rename = "Server error")]
+  ServerError,
 
   // AUTH
-  #[serde(rename = "Authentication required")]
-  AuthRequired,
+  Unauthorized,
+  Forbidden,
   #[serde(rename = "Invalid credentials")]
   BadCredentials,
-  #[serde(rename = "Already authenticated")]
-  RedundantAuth,
 
   // TABLES/KEYS
   #[serde(rename = "Already exists")]
@@ -32,12 +34,27 @@ pub enum Status {
 
 pub use Status::*;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct Response {
-  pub status: Status,
-  #[serde(flatten)]
-  pub payload: Option<Payload>,
+impl Status {
+  #[cfg(feature = "http")]
+  pub fn to_http(&self) -> http::StatusCode {
+    match *self {
+      Success => http::StatusCode::OK,
+      ConnLimit => http::StatusCode::SERVICE_UNAVAILABLE,
+      BadRequest => http::StatusCode::BAD_REQUEST,
+      ServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
+
+      Unauthorized => http::StatusCode::UNAUTHORIZED,
+      Forbidden => http::StatusCode::FORBIDDEN,
+      BadCredentials => http::StatusCode::NOT_ACCEPTABLE,
+
+      AlreadyExists => http::StatusCode::CONFLICT,
+      NoSuchTable | NoSuchKey => http::StatusCode::NOT_FOUND,
+      KeyExpired => http::StatusCode::GONE,
+    }
+  }
 }
+
+// RESPONSE PAYLOAD
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(untagged)] // we flatten this enum and have unique fields
@@ -59,7 +76,23 @@ pub enum Payload {
   },
 }
 
+// RESPONSE
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct Response {
+  pub status: Status,
+  #[serde(flatten)]
+  pub payload: Option<Payload>,
+}
+
 impl Response {
+  #[cfg(feature = "http")]
+  pub fn to_http(&self) -> http::Result<http::Response<String>> {
+    http::Response::builder()
+      .status(self.status.to_http())
+      .body("".to_owned())
+  }
+
   // OK is common
 
   pub const OK: Self = Self {

@@ -10,18 +10,15 @@ use config::*;
 use logger::*;
 use protocol::*;
 
-use rmp_serde::{from_read, to_vec};
+use rmp_serde::{from_slice, to_vec};
 use toml::{from_str, to_string_pretty};
 
 use getargs::{Opt, Options};
 use scc::HashMap;
-use tokio::{
-  fs::{metadata, File},
-  io::AsyncWriteExt,
-  time::{sleep, Duration},
-};
+use tokio::time::{sleep, Duration};
 
-use std::fs::{create_dir_all, read_to_string, File as SyncFile};
+use std::fs::{canonicalize as resolve, create_dir_all, write, File};
+use std::io::{ErrorKind as IoErrorKind, Read};
 use std::path::PathBuf;
 
 // USE JEMALLOC
@@ -40,10 +37,11 @@ pub type Database = HashMap<String, Table, Hasher>;
 pub static DB_PATH: Global<PathBuf> = Global::new();
 pub static DATABASE: Global<Database> = Global::new();
 
-async fn save_db() {
-  let mut file = wrap_fatal!(File::create(&*DB_PATH).await, "Failed to open database: {}");
-  let bytes = wrap_fatal!(to_vec(&*DATABASE), "Failed to serialize database: {}");
-  wrap_fatal!(file.write_all(&bytes).await, "Failed to write database: {}");
+fn save() {
+  if let Some(db) = DATABASE.get() {
+    let bytes = wrap_fatal!(to_vec(db), "Failed to serialize database: {}");
+    wrap_fatal!(write(&*DB_PATH, bytes), "Failed to write database: {}");
+  }
 }
 
 #[tokio::main]
@@ -59,10 +57,10 @@ async fn main() {
   // load command-line args
 
   let mut conf_path = dirs::config_dir()
-    .expect("Failed to get default user config directory")
+    .expect("Failed to get user config directory")
     .join("void/config.toml");
   let mut db_path = dirs::data_dir()
-    .expect("Failed to get default user data directory")
+    .expect("Failed to get user data directory")
     .join("void/db.void");
 
   let args = std::env::args().skip(1).collect::<Vec<_>>();
@@ -86,14 +84,17 @@ In memory key-value fault tolerant cache built to handle millions of requests.
       }
 
       Opt::Short('c') | Opt::Long("config") => {
-        conf_path = wrap_fatal!(opts.value(), "Failed to config path: {}").into();
+        conf_path = wrap_fatal!(opts.value(), "Failed to parse config path: {}").into();
+        conf_path = wrap_fatal!(resolve(conf_path), "Failed to resolve config path: {}");
       }
 
       Opt::Short('d') | Opt::Long("database") => {
-        db_path = wrap_fatal!(opts.value(), "Failed to database path: {}").into();
+        db_path = wrap_fatal!(opts.value(), "Failed to parse database path: {}").into();
+        db_path = wrap_fatal!(resolve(db_path), "Failed to resolve database path: {}");
       }
 
-      _ => eprintln!("option: {:?}", opt),
+      Opt::Short(s) => fatal!("Invalid shorthand argument: {}", s),
+      Opt::Long(l) => fatal!("Invalid argument: {}", l),
     }
   }
 
@@ -101,42 +102,49 @@ In memory key-value fault tolerant cache built to handle millions of requests.
 
   // load config
 
-  if let Ok(m) = metadata(&conf_path).await {
-    if m.is_file() {
-      let conf_string = wrap_fatal!(read_to_string(conf_path), "Failed to open config: {}");
-      let conf = wrap_fatal!(from_str(&conf_string), "Failed to parse config: {}");
-      CONFIG.set(conf);
-    } else {
-      fatal!("Provided config path is not a file!");
+  match File::open(&conf_path) {
+    Ok(mut file) => {
+      if !file.metadata().is_ok_and(|m| m.is_file()) {
+        fatal!("{} is not a file!", conf_path.to_string_lossy());
+      }
+      info!("Loading config from {}...", conf_path.to_string_lossy());
+      let str = &mut String::new();
+      wrap_fatal!(file.read_to_string(str), "Failed to read config: {}");
+      CONFIG.set(wrap_fatal!(from_str(str), "Failed to parse config: {}"));
     }
-  } else {
-    info!("Config not found, creating...");
-    if let Some(p) = conf_path.parent() {
-      wrap_fatal!(create_dir_all(p), "Failed to create config directory: {}");
+    Err(e) if e.kind() == IoErrorKind::NotFound => {
+      info!("Config not found, creating...");
+      if let Some(p) = conf_path.parent() {
+        wrap_fatal!(create_dir_all(p), "Failed to create config directory: {}");
+      }
+      CONFIG.set(Config::default());
+      let str = to_string_pretty(&*CONFIG).unwrap();
+      wrap_fatal!(write(conf_path, str), "Failed to write config: {}");
     }
-    CONFIG.set(Config::default());
-    let mut file = wrap_fatal!(File::create(conf_path).await, "Failed to open config: {}");
-    let bytes = to_string_pretty(&*CONFIG).unwrap().as_bytes().to_vec();
-    wrap_fatal!(file.write_all(&bytes).await, "Failed to write config: {}");
+    Err(e) => fatal!("Failed to load config: {}", e),
   }
 
   // load database
 
-  if let Ok(m) = metadata(&*DB_PATH).await {
-    if m.is_file() {
-      let file = wrap_fatal!(SyncFile::open(&*DB_PATH), "Failed to open database: {}");
-      let db = wrap_fatal!(from_read(file), "Failed to parse database: {}");
-      DATABASE.set(db);
-    } else {
-      fatal!("Provided database path is not a file!");
+  match File::open(&*DB_PATH) {
+    Ok(mut file) => {
+      if !file.metadata().is_ok_and(|m| m.is_file()) {
+        fatal!("{} is not a file!", DB_PATH.to_string_lossy());
+      }
+      info!("Loading database from {}...", DB_PATH.to_string_lossy());
+      let buf = &mut Vec::new();
+      wrap_fatal!(file.read_to_end(buf), "Failed to read database: {}");
+      DATABASE.set(wrap_fatal!(from_slice(buf), "Failed to parse database: {}"));
     }
-  } else {
-    info!("Database not found, creating...");
-    if let Some(p) = DB_PATH.parent() {
-      wrap_fatal!(create_dir_all(p), "Failed to create database directory: {}");
+    Err(e) if e.kind() == IoErrorKind::NotFound => {
+      info!("Database not found, creating...");
+      if let Some(p) = DB_PATH.parent() {
+        wrap_fatal!(create_dir_all(p), "Failed to create database directory: {}");
+      }
+      DATABASE.set(Database::default());
+      save();
     }
-    DATABASE.set(Database::default());
-    save_db().await;
+    Err(e) => fatal!("Failed to load database: {}", e),
   }
 
   // spawn listeners & autosaver
@@ -147,7 +155,7 @@ In memory key-value fault tolerant cache built to handle millions of requests.
     loop {
       sleep(duration).await;
       info!("Autosaving...");
-      save_db().await;
+      tokio::task::spawn_blocking(save);
       info!("Save complete.");
     }
   });
@@ -157,7 +165,7 @@ In memory key-value fault tolerant cache built to handle millions of requests.
   match tokio::signal::ctrl_c().await {
     Ok(()) => {
       info!("SIGINT detected, saving...");
-      save_db().await;
+      save();
     }
     Err(e) => error!("Failed to listen for shutdown signal: {}", e),
   }

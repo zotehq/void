@@ -6,29 +6,33 @@ pub use websocket::*;
 use crate::{config::CONFIG, logger::*, TableValue, DATABASE};
 use protocol::*;
 
+use std::error::Error as StdError;
+use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, SystemTime};
-use std::{fmt, io::Error as IoError};
 
 use scc::hash_map::Entry;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 // CONNECTION TRAIT
 
+type BoxError = Box<dyn StdError + Send + Sync + 'static>;
+
 pub enum Error {
   Closed,
   IoError(IoError),
-  BadRequest,
+  BadRequest(BoxError),
+  ServerError(BoxError),
 }
 
-impl fmt::Display for Error {
-  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl std::fmt::Display for Error {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      Self::Closed => write!(f, "Connection closed")?,
-      Self::IoError(e) => write!(f, "I/O error: {}", e)?,
-      Self::BadRequest => write!(f, "Malformed request from client")?,
+      Self::Closed => write!(f, "Connection closed"),
+      Self::IoError(e) => write!(f, "I/O error: {e}"),
+      Self::BadRequest(e) => write!(f, "Malformed request: {e}"),
+      Self::ServerError(e) => write!(f, "Internal error (this is a bug!): {e}"),
     }
-    Ok(())
   }
 }
 
@@ -36,6 +40,7 @@ impl fmt::Display for Error {
 pub trait Connection: Send + Sync + Unpin + 'static {
   async fn send(&mut self, res: Response) -> Result<(), Error>;
   async fn recv(&mut self) -> Result<Request, Error>;
+  async fn close(&mut self) -> Result<(), Error>;
 }
 
 // CONNECTION TRAIT IMPLEMENTATION HELPERS
@@ -44,39 +49,62 @@ pub trait RawStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
 impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S {}
 
 #[macro_export]
-macro_rules! check_req {
-  ($in:expr) => {
-    match $in {
-      Ok(o) => o,
-      Err(_) => return Err(Error::BadRequest),
-    }
-  };
+#[rustfmt::skip]
+macro_rules! check {
+  (req: $in:expr) => ( $in.map_err(|e| Error::BadRequest(e.into())) );
+  (srv: $in:expr) => ( $in.map_err(|e| Error::ServerError(e.into())) );
 }
 
-pub use check_req;
+pub use check;
 
 // HANDLER IMPLEMENTATION HELPERS
 
 pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
 
+#[inline]
 pub fn fmt_conns() -> String {
   let current_conns = CURRENT_CONNS.load(SeqCst);
   let max_conns = CONFIG.max_conns;
-
-  format!(
-    "({current_conns} {} / {max_conns} max)",
-    if current_conns == 1 { "conn" } else { "conns" }
-  )
+  format!("({current_conns} / {max_conns})")
 }
 
 #[macro_export]
 macro_rules! send {
   ($conn:ident, $msg:expr) => {
     if let Err(e) = $conn.send($msg).await {
-      warn!("{}", e);
+      warn!("{e}");
       return;
     }
   };
+}
+
+#[inline]
+async fn handle_err(conn: &mut dyn Connection, e: Error) {
+  match e {
+    Error::Closed => {}
+    Error::IoError(ref ioerr) => match ioerr.kind() {
+      IoErrorKind::ConnectionReset
+      | IoErrorKind::ConnectionRefused
+      | IoErrorKind::ConnectionAborted => {} // silently close
+      IoErrorKind::OutOfMemory => {
+        error!("{e}");
+        send!(conn, Response::status(ServerError));
+      }
+      IoErrorKind::InvalidInput => {
+        error!("Internal error (this is a bug!): {ioerr}");
+        send!(conn, Response::status(ServerError));
+      }
+      _ => warn!("{e}"),
+    },
+    Error::BadRequest(_) => {
+      warn!("{e}");
+      send!(conn, Response::status(BadRequest));
+    }
+    Error::ServerError(_) => {
+      error!("{e}");
+      send!(conn, Response::status(ServerError));
+    }
+  }
 }
 
 // CONNECTION HANDLER
@@ -90,29 +118,16 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
   loop {
     let request = match conn.recv().await {
       Ok(r) => r,
-      Err(e) => match e {
-        Error::Closed => break,
-        Error::IoError(_) => {
-          warn!("{}", e);
-          continue;
-        }
-        Error::BadRequest => {
-          warn!("{}", e);
-          send!(conn, Response::status(BadRequest));
-          continue;
-        }
-      },
+      Err(e) => {
+        handle_err(conn, e).await;
+        break;
+      }
     };
 
     match request {
       Request::Ping => {
         trace!("PING requested");
         send!(conn, Response::ok(Payload::Pong));
-      }
-
-      Request::Auth { .. } if authenticated => {
-        trace!("Redundant AUTH attempted");
-        send!(conn, Response::status(RedundantAuth));
       }
 
       Request::Auth { username, password } => {
@@ -235,11 +250,12 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
         }
       }
 
-      // (redundant) authentication & malformed requests will be caught before this point
-      _ => send!(conn, Response::status(AuthRequired)),
+      // malformed requests will be caught before this point
+      _ => send!(conn, Response::status(Unauthorized)),
     }
   }
 
+  let _ = conn.close().await;
   CURRENT_CONNS.fetch_sub(1, SeqCst);
   info!("Connection closed {}", fmt_conns());
 }

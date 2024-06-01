@@ -1,7 +1,7 @@
-use std::cell::UnsafeCell;
-use std::marker::PhantomData;
-use std::mem::MaybeUninit;
-use std::panic::{RefUnwindSafe, UnwindSafe};
+use crate::logger::*;
+use std::fmt::Debug;
+use std::ops::Deref;
+use std::sync::OnceLock;
 
 // MACROS
 
@@ -19,45 +19,37 @@ macro_rules! wrap_fatal {
 
 // GLOBAL STATE CONTAINER
 
-/// Using OnceLock was annoying me a bit.
-/// This struct does everything we need, with less hassle.
-/// Safety is entirely dependent on us not being stupid. I think we'll be fine.
-pub struct Global<T> {
-  value: UnsafeCell<MaybeUninit<T>>,
-  _marker: PhantomData<T>,
-}
+/// Small wrapper around OnceLock to impl Deref
+pub struct Global<T: Debug>(OnceLock<T>);
 
-impl<T> Global<T> {
+impl<T: Debug> Global<T> {
   #[inline]
   pub const fn new() -> Self {
-    Self {
-      value: UnsafeCell::new(MaybeUninit::uninit()),
-      _marker: PhantomData,
-    }
+    Self(OnceLock::new())
+  }
+
+  #[inline]
+  pub fn get(&self) -> Option<&T> {
+    self.0.get()
   }
 
   #[inline]
   pub fn set(&self, value: T) {
-    // SAFETY: we call this long before any accesses
-    unsafe {
-      (*self.value.get()).write(value);
-    }
+    self.0.set(value).unwrap();
   }
 }
 
-impl<T> std::ops::Deref for Global<T> {
+impl<T: Debug> Deref for Global<T> {
   type Target = T;
   #[inline]
   fn deref(&self) -> &Self::Target {
-    // SAFETY: we never deref before initialization
-    unsafe { (*self.value.get()).assume_init_ref() }
+    if let Some(ptr) = self.0.get() {
+      ptr
+    } else {
+      fatal!("Global deref failed");
+    }
   }
 }
-
-unsafe impl<T: Sync + Send> Sync for Global<T> {}
-unsafe impl<T: Send> Send for Global<T> {}
-impl<T: RefUnwindSafe + UnwindSafe> RefUnwindSafe for Global<T> {}
-impl<T: UnwindSafe> UnwindSafe for Global<T> {}
 
 // HASHER
 

@@ -2,6 +2,7 @@
 use scc::HashMap;
 #[cfg(not(feature = "scc"))]
 use std::collections::HashMap;
+
 use serde::{ser::Error as _, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::hash_map::RandomState;
 use std::time::{Duration, SystemTime};

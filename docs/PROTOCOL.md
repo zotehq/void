@@ -2,7 +2,8 @@
 
 The client initiates a connection by establishing a raw TCP or WebSocket connection with the server and then authenticating.
 Upon successful connection, both the client and server can start exchanging data.
-JSON is used for messaging to keep the protocol simple.
+
+Serialization format depends on the connection protocol. For raw TCP, MessagePack is used, and for WebSocket, JSON is used.
 
 ## Custom Types
 
@@ -27,10 +28,11 @@ All responses follow this structure: `{ "status": string, (...data) }`
 - `OK`: Operation succeeded with zero errors
 - `Too many connections`: Server reached its connection limit
 - `Malformed request`: Request was built improperly
+- `Server error`: Error occured on the server (this is a bug!)
 
-- `Authentication required`: `AUTH` is required for this operation
+- `Unauthorized`: `AUTH` is required for this operation
+- `Forbidden`: Client doesn't have permission to perform the action
 - `Invalid credentials`: `AUTH` was attempted with invalid credentials
-- `Already authenticated`: `AUTH` was attempted after earlier successful `AUTH`
 
 - `Already exists`: Tried to create table or key which already exists
 - `No such table`: Operation was attempted on a non-existent table

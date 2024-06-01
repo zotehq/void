@@ -1,23 +1,26 @@
 use super::*;
 
-use std::io::ErrorKind as IoErrorKind;
-
-use futures_util::{
-  stream::{SplitSink, SplitStream, StreamExt},
-  SinkExt,
-};
+use futures_util::{stream::StreamExt, SinkExt};
 use simd_json::serde::{from_slice_with_buffers as from_bytes, from_str_with_buffers as from_str};
 use tokio_tungstenite::{
   accept_async_with_config,
   tungstenite::{protocol::WebSocketConfig, Error as WsError, Message},
-  WebSocketStream as Stream,
+  WebSocketStream,
 };
+use IoErrorKind::*;
 
-pub struct WebSocketConnection<S: RawStream>(
-  SplitSink<Stream<S>, Message>,
-  SplitStream<Stream<S>>,
-  simd_json::Buffers,
-);
+pub struct WebSocketConnection<S: RawStream>(WebSocketStream<S>, simd_json::Buffers);
+
+#[inline]
+fn map_err(e: WsError) -> Error {
+  match e {
+    WsError::ConnectionClosed | WsError::AlreadyClosed => Error::Closed,
+    WsError::Io(e) => Error::IoError(e),
+    WsError::Capacity(_) => Error::IoError(IoError::new(InvalidData, "Outgoing message too large")),
+    WsError::WriteBufferFull(_) => Error::ServerError("WebSocket write buffer full".into()),
+    _ => Error::BadRequest(e.into()),
+  }
+}
 
 impl<S: RawStream> WebSocketConnection<S> {
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
@@ -27,19 +30,7 @@ impl<S: RawStream> WebSocketConnection<S> {
     };
 
     let ws = accept_async_with_config(stream, Some(cfg)).await?;
-    let (write, read) = ws.split();
-    Ok(Self(write, read, simd_json::Buffers::new(256)))
-  }
-
-  async fn send_msg(&mut self, msg: Message) -> Result<(), Error> {
-    match self.0.send(msg).await {
-      Ok(_) => Ok(()),
-      Err(e) => Err(Error::IoError(match e {
-        WsError::Io(e) => e,
-        WsError::Utf8 => IoErrorKind::InvalidData.into(),
-        _ => IoErrorKind::Other.into(),
-      })),
-    }
+    Ok(Self(ws, simd_json::Buffers::new(256)))
   }
 }
 
@@ -47,18 +38,24 @@ impl<S: RawStream> WebSocketConnection<S> {
 impl<S: RawStream> Connection for WebSocketConnection<S> {
   #[inline]
   async fn send(&mut self, res: Response) -> Result<(), Error> {
-    self.send_msg(Message::Text(simd_json::to_string(&res).unwrap())).await
+    let string = simd_json::to_string(&res).map_err(|e| Error::ServerError(e.into()))?;
+    self.0.send(Message::Text(string)).await.map_err(map_err)
   }
 
   async fn recv(&mut self) -> Result<Request, Error> {
-    match self.1.next().await {
+    match self.0.next().await {
       None => Err(Error::Closed),
-      Some(msg) => match check_req!(msg) {
-        Message::Text(mut s) => Ok(check_req!(unsafe { from_str(&mut s, &mut self.2) })),
-        Message::Binary(mut b) => Ok(check_req!(from_bytes(&mut b, &mut self.2))),
+      Some(msg) => match check!(req: msg)? {
+        Message::Text(mut s) => check!(req: unsafe { from_str(&mut s, &mut self.1) }),
+        Message::Binary(mut b) => check!(req: from_bytes(&mut b, &mut self.1)),
         Message::Close(_) => Err(Error::Closed),
-        _ => Err(Error::BadRequest),
+        _ => Err(Error::BadRequest("Invalid WebSocket message type".into())),
       },
     }
+  }
+
+  #[inline]
+  async fn close(&mut self) -> Result<(), Error> {
+    self.0.close(None).await.map_err(map_err)
   }
 }

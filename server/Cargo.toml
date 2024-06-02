@@ -11,7 +11,7 @@ log = { version = "0.4", features = ["serde"] }
 tokio = { version = "1", features = ["rt-multi-thread", "io-util", "net", "time", "macros", "signal", "fs"] }
 tokio-stream = "0.1"
 tokio-native-tls = "0.3"
-tokio-tungstenite = "0.21"
+tokio-tungstenite = "0.22"
 async-trait = "0.1"
 futures-util = "0.3"
 # internals

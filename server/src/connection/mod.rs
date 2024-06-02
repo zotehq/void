@@ -1,13 +1,13 @@
+mod error;
 mod tcp;
 mod websocket;
+pub use error::*;
 pub use tcp::*;
 pub use websocket::*;
 
 use crate::{config::CONFIG, logger::*, TableValue, DATABASE};
 use protocol::*;
 
-use std::error::Error as StdError;
-use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, SystemTime};
 
@@ -16,26 +16,6 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 // CONNECTION TRAIT
 
-type BoxError = Box<dyn StdError + Send + Sync + 'static>;
-
-pub enum Error {
-  Closed,
-  IoError(IoError),
-  BadRequest(BoxError),
-  ServerError(BoxError),
-}
-
-impl std::fmt::Display for Error {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    match self {
-      Self::Closed => write!(f, "Connection closed"),
-      Self::IoError(e) => write!(f, "I/O error: {e}"),
-      Self::BadRequest(e) => write!(f, "Malformed request: {e}"),
-      Self::ServerError(e) => write!(f, "Internal error (this is a bug!): {e}"),
-    }
-  }
-}
-
 #[async_trait::async_trait]
 pub trait Connection: Send + Sync + Unpin + 'static {
   async fn send(&mut self, res: Response) -> Result<(), Error>;
@@ -43,22 +23,19 @@ pub trait Connection: Send + Sync + Unpin + 'static {
   async fn close(&mut self) -> Result<(), Error>;
 }
 
-// CONNECTION TRAIT IMPLEMENTATION HELPERS
-
 pub trait RawStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
 impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S {}
 
 #[macro_export]
 #[rustfmt::skip]
 macro_rules! check {
-  (req: $in:expr) => ( $in.map_err(|e| Error::BadRequest(e.into())) );
-  (srv: $in:expr) => ( $in.map_err(|e| Error::ServerError(e.into())) );
-  (io: $in:expr) => ( $in.map_err(Error::IoError) );
+  (req: $in:expr) => ( $in.map_err(|e| Error::new(BadRequest.into(), e.into())) );
+  (srv: $in:expr) => ( $in.map_err(|e| Error::new(ServerError.into(), e.into())) );
 }
 
 pub use check;
 
-// HANDLER IMPLEMENTATION HELPERS
+// CONNECTION HANDLER
 
 pub static CURRENT_CONNS: AtomicUsize = AtomicUsize::new(0);
 
@@ -74,13 +51,12 @@ macro_rules! send {
   ($conn:ident, $msg:expr) => {
     if let Err(e) = $conn.send($msg).await {
       warn!("{e}");
-      return;
+      break;
     }
   };
 }
 
-// CONNECTION HANDLER
-
+#[inline] // we only call this once, just inline
 pub async fn handle_conn(conn: &mut dyn Connection) {
   CURRENT_CONNS.fetch_add(1, SeqCst);
   info!("Connection established {}", fmt_conns());
@@ -90,40 +66,21 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
   loop {
     let request = match conn.recv().await {
       Ok(r) => r,
-      Err(e) => match e {
-        Error::Closed => break,
-        Error::IoError(ref ioerr) => match ioerr.kind() {
-          IoErrorKind::ConnectionReset
-          | IoErrorKind::ConnectionRefused
-          | IoErrorKind::ConnectionAborted
-          | IoErrorKind::UnexpectedEof => break, // silently close
-          IoErrorKind::OutOfMemory | IoErrorKind::WriteZero => {
-            error!("{e}");
-            send!(conn, Response::status(ServerError));
-            break;
-          }
-          IoErrorKind::InvalidInput => {
-            error!("Internal error (this is a bug!): {ioerr}");
-            send!(conn, Response::status(ServerError));
-            break;
-          }
-          // typically these can be retried
-          IoErrorKind::Interrupted | IoErrorKind::TimedOut => {
-            warn!("{e}");
-            continue;
-          }
-          // TODO: handle more errors, for now just gtfo
-          _ => break,
-        },
-        Error::BadRequest(_) => {
+      Err(e) => match e.kind {
+        Closed => break,
+        Ignored => {
           warn!("{e}");
-          send!(conn, Response::status(BadRequest));
+          continue;
+        }
+        Continue => continue,
+        Io(_) => {
+          error!("{e}");
           break;
         }
-        Error::ServerError(_) => {
-          error!("{e}");
-          send!(conn, Response::status(ServerError));
-          break;
+        ErrorKind::Status(s) => {
+          warn!("{e}");
+          send!(conn, Response::status(s));
+          continue;
         }
       },
     };
@@ -142,7 +99,7 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
           send!(conn, Response::OK);
         } else {
           trace!("AUTH failed with invalid credentials");
-          send!(conn, Response::status(BadCredentials));
+          send!(conn, Response::status(Unauthorized));
         }
       }
 
@@ -151,7 +108,7 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
         let mut tables = Vec::<String>::with_capacity(DATABASE.len());
         let mut entry = DATABASE.first_entry_async().await;
         while let Some(e) = &entry {
-          tables.push(e.key().clone());
+          tables.push(e.key().to_owned());
           entry = entry.unwrap().next_async().await;
         }
         send!(conn, Response::ok(Payload::Tables { tables }));
@@ -165,7 +122,7 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
             // build Table from InsertTable
             let mut entry = prot_tbl.first_entry_async().await;
             while let Some(e) = &entry {
-              let key = e.key().clone();
+              let key = e.key().to_owned();
               let InsertTableValue { value, lifetime } = e.get().clone();
               let expiry = lifetime.map(|exp| SystemTime::now() + Duration::from_secs(exp));
               let _ = tbl.insert_async(key, TableValue { value, expiry }).await;
@@ -199,13 +156,13 @@ pub async fn handle_conn(conn: &mut dyn Connection) {
       Request::List { table } if authenticated => {
         trace!("LIST requested | table: {}", table);
         if let Some(tbl) = DATABASE.get_async(&table).await {
-          let mut tables = Vec::<String>::with_capacity(tbl.len());
+          let mut keys = Vec::<String>::with_capacity(tbl.len());
           let mut entry = tbl.first_entry_async().await;
           while let Some(e) = &entry {
-            tables.push(e.key().clone());
+            keys.push(e.key().to_owned());
             entry = entry.unwrap().next_async().await;
           }
-          send!(conn, Response::ok(Payload::Tables { tables }));
+          send!(conn, Response::ok(Payload::Keys { keys }));
         } else {
           send!(conn, Response::status(NoSuchTable));
         }

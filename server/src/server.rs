@@ -43,7 +43,7 @@ async fn conn_handoff(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
 macro_rules! listener {
   ($protocol:expr, $addr:expr, $tls:expr, $max_conns:expr) => {
     async move {
-      let listener = match TcpListener::bind($addr.clone()).await {
+      let listener = match TcpListener::bind($addr).await {
         Ok(l) => l,
         Err(e) => {
           fatal!("Failed to bind: {}", e);

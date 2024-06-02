@@ -24,7 +24,7 @@ pub struct Config {
   pub username: String,
   pub password: String,
   pub max_conns: usize,
-  pub max_body_size: usize,
+  pub max_message_size: usize,
 }
 
 impl Default for Config {
@@ -47,7 +47,7 @@ impl Default for Config {
       username: "admin".to_owned(),
       password: "password".to_owned(),
       max_conns: 10000,
-      max_body_size: 8 * 1024 * 1024,
+      max_message_size: 8 * 1024 * 1024,
     }
   }
 }

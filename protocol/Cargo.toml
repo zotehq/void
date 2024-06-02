@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 serde = { version = "1.0", default-features = false, features = ["derive"] }
+serde_variant = "0.1"
 http = { version = "1.1", optional = true }
 scc = { version = "2.1", features = ["serde"], optional = true }
 

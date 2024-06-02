@@ -1,12 +1,10 @@
 use crate::{Table, TableValue};
 use serde::{Deserialize, Serialize};
 
-// RESPONSE STATUS
-
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+/// Response status. Also functions as an Error type.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Status {
-  // COMMON
-  #[serde(rename = "OK")]
   Success,
   #[serde(rename = "Too many connections")]
   ConnLimit,
@@ -15,11 +13,16 @@ pub enum Status {
   #[serde(rename = "Server error")]
   ServerError,
 
+  // MESSAGE LIMITS
+  #[serde(rename = "Request too large")]
+  RequestTooLarge,
+  #[serde(rename = "Response too large")]
+  ResponseTooLarge,
+
   // AUTH
   Unauthorized,
-  Forbidden,
-  #[serde(rename = "Invalid credentials")]
-  BadCredentials,
+  #[serde(rename = "Permission denied")]
+  PermissionDenied,
 
   // TABLES/KEYS
   #[serde(rename = "Already exists")]
@@ -43,14 +46,30 @@ impl Status {
       BadRequest => http::StatusCode::BAD_REQUEST,
       ServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
 
+      RequestTooLarge => http::StatusCode::PAYLOAD_TOO_LARGE,
+      ResponseTooLarge => http::StatusCode::NOT_ACCEPTABLE,
+
       Unauthorized => http::StatusCode::UNAUTHORIZED,
-      Forbidden => http::StatusCode::FORBIDDEN,
-      BadCredentials => http::StatusCode::NOT_ACCEPTABLE,
+      PermissionDenied => http::StatusCode::FORBIDDEN,
 
       AlreadyExists => http::StatusCode::CONFLICT,
       NoSuchTable | NoSuchKey => http::StatusCode::NOT_FOUND,
       KeyExpired => http::StatusCode::GONE,
     }
+  }
+}
+
+impl std::fmt::Display for Status {
+  #[inline]
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.write_str(serde_variant::to_variant_name(self).unwrap())
+  }
+}
+
+impl Default for Status {
+  #[inline]
+  fn default() -> Self {
+    Self::Success
   }
 }
 
@@ -78,7 +97,7 @@ pub enum Payload {
 
 // RESPONSE
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Response {
   pub status: Status,
   #[serde(flatten)]

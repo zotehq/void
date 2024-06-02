@@ -7,25 +7,14 @@ use tokio_tungstenite::{
   tungstenite::{protocol::WebSocketConfig, Error as WsError, Message},
   WebSocketStream,
 };
-use IoErrorKind::*;
 
 pub struct WebSocketConnection<S: RawStream>(WebSocketStream<S>, simd_json::Buffers);
 
-#[inline]
-fn map_err(e: WsError) -> Error {
-  match e {
-    WsError::ConnectionClosed | WsError::AlreadyClosed => Error::Closed,
-    WsError::Io(e) => Error::IoError(e),
-    WsError::Capacity(_) => Error::IoError(IoError::new(InvalidData, "Outgoing message too large")),
-    WsError::WriteBufferFull(_) => Error::ServerError("WebSocket write buffer full".into()),
-    _ => Error::BadRequest(e.into()),
-  }
-}
-
 impl<S: RawStream> WebSocketConnection<S> {
+  #[inline] // we only call this once, just inline
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
     let cfg = WebSocketConfig {
-      max_message_size: Some(CONFIG.max_body_size),
+      max_message_size: Some(CONFIG.max_message_size),
       ..Default::default()
     };
 
@@ -39,23 +28,27 @@ impl<S: RawStream> Connection for WebSocketConnection<S> {
   #[inline]
   async fn send(&mut self, res: Response) -> Result<(), Error> {
     let string = check!(srv: simd_json::to_string(&res))?;
-    self.0.send(Message::Text(string)).await.map_err(map_err)
+    match self.0.send(Message::Text(string)).await {
+      Ok(_) => Ok(()),
+      Err(WsError::Capacity(_)) => Err(ResponseTooLarge.into()),
+      Err(e) => Err(e.into()),
+    }
   }
 
   async fn recv(&mut self) -> Result<Request, Error> {
     match self.0.next().await {
-      None => Err(Error::Closed),
-      Some(msg) => match check!(req: msg)? {
+      None => Err(Closed.into()),
+      Some(msg) => match msg.map_err(Error::from)? {
         Message::Text(mut s) => check!(req: unsafe { from_str(&mut s, &mut self.1) }),
         Message::Binary(mut b) => check!(req: from_bytes(&mut b, &mut self.1)),
-        Message::Close(_) => Err(Error::Closed),
-        _ => Err(Error::BadRequest("Invalid WebSocket message type".into())),
+        Message::Close(_) => Err(Closed.into()),
+        _ => Err(Ignored.into()),
       },
     }
   }
 
   #[inline]
   async fn close(&mut self) -> Result<(), Error> {
-    self.0.close(None).await.map_err(map_err)
+    self.0.close(None).await.map_err(|_| Closed.into())
   }
 }

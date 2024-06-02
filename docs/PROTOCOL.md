@@ -34,14 +34,16 @@ All responses follow this structure: `{ "status": string, (...data) }`
 
 ### Statuses
 
-- `OK`: Operation succeeded with zero errors
+- `Success`: Operation succeeded with zero errors
 - `Too many connections`: Server reached its connection limit
 - `Malformed request`: Request was built improperly
 - `Server error`: Error occured on the server (this is a bug!)
 
-- `Unauthorized`: `AUTH` is required for this operation
-- `Forbidden`: Client doesn't have permission to perform the action
-- `Invalid credentials`: `AUTH` was attempted with invalid credentials
+- `Request too large`: Request does not fit in the server's configured message size
+- `Response too large`: Requested data could not fit in the server's configured message size
+
+- `Unauthorized`: `AUTH` is required for this operation OR `AUTH` failed
+- `Permission denied`: Client doesn't have permission to perform the action
 
 - `Already exists`: Tried to create table or key which already exists
 - `No such table`: Operation was attempted on a non-existent table

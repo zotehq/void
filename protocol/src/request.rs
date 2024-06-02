@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "action")]
 #[serde(rename_all = "UPPERCASE")]
+#[non_exhaustive]
 pub enum Request {
   Ping,
   Auth {

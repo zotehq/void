@@ -22,16 +22,16 @@ impl<S: RawStream> Connection for TcpConnection<S> {
     }
     // PERF: for some reason this is the fastest way to do this
     let bytes = [&(msg.len() as u32).to_le_bytes(), msg.as_slice()].concat();
-    check!(req: self.0.write_all(&bytes).await)
+    check!(etc: self.0.write_all(&bytes).await)
   }
 
   #[inline]
   async fn recv(&mut self) -> Result<Request, Error> {
-    let len = check!(req: self.0.read_u32_le().await)? as usize;
+    let len = check!(etc: self.0.read_u32_le().await)? as usize;
     if len > CONFIG.max_message_size {
       return Err(RequestTooLarge.into());
     }
-    check!(req: self.0.read_exact(&mut self.1[0..len]).await)?;
+    check!(etc: self.0.read_exact(&mut self.1[0..len]).await)?;
     check!(req: from_slice(&self.1[0..len]))
   }
 

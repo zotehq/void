@@ -31,6 +31,7 @@ impl<S: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static> RawStream for S 
 macro_rules! check {
   (req: $in:expr) => ( $in.map_err(|e| Error::new(BadRequest.into(), e.into())) );
   (srv: $in:expr) => ( $in.map_err(|e| Error::new(ServerError.into(), e.into())) );
+  (etc: $in:expr) => ( $in.map_err(Error::from) );
 }
 
 pub use check;

@@ -69,7 +69,7 @@ impl From<IoError> for Error {
       IoErrorKind::OutOfMemory | IoErrorKind::WriteZero => Io(e.kind()).into(),
       IoErrorKind::InvalidInput => Error::new(ServerError.into(), e.into()),
       IoErrorKind::Interrupted | IoErrorKind::TimedOut => Continue.into(),
-      _ => Closed.into(),
+      _ => Error::new(BadRequest.into(), e.into()),
     }
   }
 }

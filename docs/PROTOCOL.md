@@ -8,11 +8,14 @@ The underlying structures will be the same regardless of the protocol, but the s
 
 MessagePack is used for serialization, due to fast implementations being available for many languages, and its small size.
 The first 4 bytes of each message will be a 32-bit unsigned integer in little-endian format, which represents the size of the message.
+The 5th byte will be used for signaling compression. Compression will be disabled (0) until the client sends a list of
 
 ### WebSocket
 
 JSON is used for serialization, due to the fast JSON implementation already available right in the browser, and ease of use.
 The WebSocket server implementation accepts either string or binary messages, but always sends back a string.
+
+Compression is not supported at this time.
 
 ## Custom Types
 
@@ -62,6 +65,7 @@ All requests follow this structure: `{ "action": string, (...data) }`
 | --------- | ---------------------------------------- | ------------------------ |
 | `PING`    | ...                                      | ...                      |
 | `AUTH`    | `"username": string, "password": string` | ...                      |
+| `CONFIG`  | `"compression": [string]`                | ...                      |
 
 #### Privileged
 

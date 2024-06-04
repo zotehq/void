@@ -57,7 +57,7 @@ macro_rules! send {
   };
 }
 
-#[inline] // we only call this once, just inline
+#[inline(always)] // we only call this once, always inline
 pub async fn handle_conn(conn: &mut dyn Connection) {
   CURRENT_CONNS.fetch_add(1, SeqCst);
   info!("Connection established {}", fmt_conns());

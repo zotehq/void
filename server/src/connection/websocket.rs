@@ -11,7 +11,7 @@ use tokio_tungstenite::{
 pub struct WebSocketConnection<S: RawStream>(WebSocketStream<S>, simd_json::Buffers);
 
 impl<S: RawStream> WebSocketConnection<S> {
-  #[inline] // we only call this once, just inline
+  #[inline(always)] // we only call this once, always inline
   pub async fn convert_stream(stream: S) -> Result<Self, WsError> {
     let cfg = WebSocketConfig {
       max_message_size: Some(CONFIG.max_message_size),
@@ -35,6 +35,7 @@ impl<S: RawStream> Connection for WebSocketConnection<S> {
     }
   }
 
+  #[inline]
   async fn recv(&mut self) -> Result<Request, Error> {
     match self.0.next().await {
       None => Err(Closed.into()),

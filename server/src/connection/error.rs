@@ -1,5 +1,5 @@
+use crate::BoxError;
 use protocol::*;
-use std::error::Error as StdError;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
 use tokio_tungstenite::tungstenite::Error as WsError;
 
@@ -38,8 +38,6 @@ impl std::fmt::Display for ErrorKind {
 }
 
 // TYPE
-
-type BoxError = Box<dyn StdError + Send + Sync + 'static>;
 
 #[derive(Debug)]
 pub struct Error {

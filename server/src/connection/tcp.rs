@@ -1,14 +1,19 @@
 use super::*;
 
+use crate::compression::{read, Mode};
+
+use bytes::BytesMut;
 use rmp_serde::{from_slice, to_vec};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader};
 
-pub struct TcpConnection<S: RawStream>(BufReader<S>, Vec<u8>);
+pub struct TcpConnection<S: RawStream>(BufReader<S>, BytesMut);
 
 impl<S: RawStream> From<S> for TcpConnection<S> {
-  #[inline] // we only call this once, just inline
+  #[inline(always)] // we only call this once, always inline
   fn from(stream: S) -> Self {
-    Self(BufReader::new(stream), vec![0; CONFIG.max_message_size])
+    // add an extra 4 bytes for uncompressed length size
+    let len = CONFIG.max_message_size + 4;
+    Self(BufReader::new(stream), BytesMut::zeroed(len))
   }
 }
 
@@ -21,7 +26,12 @@ impl<S: RawStream> Connection for TcpConnection<S> {
       return Err(ResponseTooLarge.into());
     }
     // PERF: for some reason this is the fastest way to do this
-    let bytes = [&(msg.len() as u32).to_le_bytes(), msg.as_slice()].concat();
+    let bytes = [
+      &(msg.len() as u32).to_le_bytes(),
+      [0].as_slice(), // TODO: compression
+      msg.as_slice(),
+    ]
+    .concat();
     check!(etc: self.0.write_all(&bytes).await)
   }
 
@@ -31,8 +41,17 @@ impl<S: RawStream> Connection for TcpConnection<S> {
     if len > CONFIG.max_message_size {
       return Err(RequestTooLarge.into());
     }
-    check!(etc: self.0.read_exact(&mut self.1[0..len]).await)?;
-    check!(req: from_slice(&self.1[0..len]))
+
+    let comp = check!(etc: self.0.read_u8().await)?;
+    if comp == 0 {
+      check!(etc: self.0.read_exact(&mut self.1[0..len]).await)?;
+      check!(req: from_slice(&self.1[0..len]))
+    } else {
+      let mode = check!(req: Mode::from_u8(comp))?;
+      let full_len = check!(etc: self.0.read_u32_le().await)? as usize;
+      let uncompressed = check!(req: read(&mut self.0, len, full_len, mode).await)?;
+      check!(req: from_slice(&uncompressed))
+    }
   }
 
   #[inline]

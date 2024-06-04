@@ -1,7 +1,11 @@
 use crate::logger::*;
+use std::error::Error as StdError;
 use std::fmt::Debug;
 use std::ops::Deref;
 use std::sync::OnceLock;
+
+pub type BoxError = Box<dyn StdError + Send + Sync + 'static>;
+pub type AnyResult<T> = Result<T, BoxError>;
 
 // MACROS
 

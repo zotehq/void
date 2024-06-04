@@ -21,6 +21,18 @@ rmp-serde = "1.3" # database & raw TCP protocol
 simd-json = { version = "0.13", default-features = false, features = ["serde_impl", "swar-number-parsing"]} # WebSocket & HTTP protocol
 gxhash = { version = "3", optional = true }
 scc = { version = "2.1", features = ["serde"] }
+bytes = "1.6"
+# bytes compression
+lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
+zstd = { version = "0.13", default-features = false }
+snap = "1"
+brotli = "6.0"
+flate2 = { version = "1.0", default-features = false, features = ["zlib-ng-compat"] }
+weezl = { version = "0.1", features = ["async"] }
+# stream compression (depends on above crates, minimal extra deps)
+async-compression = { version = "0.4", features = ["tokio", "deflate", "zlib", "gzip", "brotli", "zstd"]}
+tokio-snappy = "0.2"
+tokio-util = { version = "0.7", features = ["compat"] } # for weezl
 # command-line arguments
 getargs = "0.5"
 dirs = "5.0"

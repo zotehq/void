@@ -25,6 +25,9 @@ pub struct Config {
   pub password: String,
   pub max_conns: usize,
   pub max_message_size: usize,
+  pub compress_threshold: usize,
+  #[cfg(feature = "sentry")]
+  pub sentry_url: Option<String>,
 }
 
 impl Default for Config {
@@ -48,6 +51,9 @@ impl Default for Config {
       password: "password".to_owned(),
       max_conns: 10000,
       max_message_size: 8 * 1024 * 1024,
+      compress_threshold: 128 * 1204,
+      #[cfg(feature = "sentry")]
+      sentry_url: None,
     }
   }
 }

@@ -1,6 +1,6 @@
 use crate::{config::CONFIG, connection::*, logger::*, util::Global, wrap_fatal};
 use protocol::{Response, Status::ConnLimit};
-use std::sync::{atomic::Ordering::SeqCst, Arc};
+use std::sync::atomic::Ordering::SeqCst;
 use tokio::net::TcpListener;
 use tokio_native_tls::{native_tls, TlsAcceptor as AsyncTlsAcceptor};
 
@@ -8,13 +8,13 @@ use tokio_native_tls::{native_tls, TlsAcceptor as AsyncTlsAcceptor};
 
 // convert raw stream into either a TCP or WebSocket connection
 #[inline(always)]
-async fn convert_stream<S: RawStream>(stream: S, protocol: &str) -> Option<Arc<dyn Connection>> {
+async fn convert_stream<S: RawStream>(stream: S, protocol: &str) -> Option<Box<dyn Connection>> {
   if protocol == "TCP" {
-    return Some(Arc::new(TcpConnection::from(stream)));
+    return Some(Box::new(TcpConnection::from(stream)));
   }
 
   match WebSocketConnection::convert_stream(stream).await {
-    Ok(c) => Some(Arc::new(c)),
+    Ok(c) => Some(Box::new(c)),
     Err(e) => {
       error!("Failed to convert TCP stream to WebSocket: {}", e);
       None
@@ -23,9 +23,9 @@ async fn convert_stream<S: RawStream>(stream: S, protocol: &str) -> Option<Arc<d
 }
 
 // do some small stuff to hand control off to the connection handler
-async fn conn_handoff(mut conn: Option<Arc<dyn Connection>>, accept: bool) {
+async fn conn_handoff(mut conn: Option<Box<dyn Connection>>, accept: bool) {
   let conn = match conn.as_mut() {
-    Some(c) => Arc::get_mut(c).unwrap(),
+    Some(c) => c.as_mut(),
     None => return,
   };
 

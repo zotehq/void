@@ -1,3 +1,4 @@
+pub mod compression;
 pub mod config;
 pub mod connection;
 pub mod logger;

@@ -7,8 +7,28 @@ The underlying structures will be the same regardless of the protocol, but the s
 ### TCP
 
 MessagePack is used for serialization, due to fast implementations being available for many languages, and its small size.
-The first 4 bytes of each message will be a 32-bit unsigned integer in little-endian format, which represents the size of the message.
-The 5th byte will be used for signaling compression. Compression will be disabled (0) until the client sends a list of
+
+| Field Size (bytes) | Format                 | Description                                                            |
+| ------------------ | ---------------------- | ---------------------------------------------------------------------- |
+| 4                  | uint32 (little-endian) | Size of the (potentially compressed) MessagePack formatted message.    |
+| 1                  | uint8                  | Compression mode. If 0, the next 4 bytes will be part of the message.  |
+| 4                  | uint32 (little-endian) | Size of the uncompressed data. Only sent if compression mode is not 0. |
+| ...                | \[uint8\]              | The (potentially compressed) MessagePack formatted message.            |
+
+#### Compression
+
+At this time, compression is only used in requests.
+
+| Bit | Mode    |
+| --- | ------- |
+| 1   | LZ4     |
+| 2   | Zstd    |
+| 3   | Snappy  |
+| 4   | Brotli  |
+| 5   | DEFLATE |
+| 6   | zlib    |
+| 7   | gzip    |
+| 8   | LZW     |
 
 ### WebSocket
 
@@ -65,7 +85,6 @@ All requests follow this structure: `{ "action": string, (...data) }`
 | --------- | ---------------------------------------- | ------------------------ |
 | `PING`    | ...                                      | ...                      |
 | `AUTH`    | `"username": string, "password": string` | ...                      |
-| `CONFIG`  | `"compression": [string]`                | ...                      |
 
 #### Privileged
 

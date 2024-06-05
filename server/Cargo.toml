@@ -22,8 +22,8 @@ simd-json = { version = "0.13", default-features = false, features = ["serde_imp
 gxhash = { version = "3", optional = true }
 scc = { version = "2.1", features = ["serde"] }
 bytes = "1.6"
-# bytes compression
-lz4_flex = { version = "0.11", default-features = false, features = ["std"] }
+# buffer compression
+lz4_flex = { version = "0.11", default-features = false, features = ["frame"] }
 zstd = { version = "0.13", default-features = false }
 snap = "1"
 brotli = "6.0"
@@ -32,7 +32,7 @@ weezl = { version = "0.1", features = ["async"] }
 # stream compression (depends on above crates, minimal extra deps)
 async-compression = { version = "0.4", features = ["tokio", "deflate", "zlib", "gzip", "brotli", "zstd"]}
 tokio-snappy = "0.2"
-tokio-util = { version = "0.7", features = ["compat"] } # for weezl
+tokio-util = { version = "0.7", features = ["compat", "io-util"] } # for LZW & LZ4
 # command-line arguments
 getargs = "0.5"
 dirs = "5.0"

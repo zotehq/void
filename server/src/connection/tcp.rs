@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::compression::{read, Mode};
+use crate::compression::{read::read_to_bytes, Mode};
 
 use bytes::BytesMut;
 use rmp_serde::{from_slice, to_vec};
@@ -47,9 +47,9 @@ impl<S: RawStream> Connection for TcpConnection<S> {
       check!(etc: self.0.read_exact(&mut self.1[0..len]).await)?;
       check!(req: from_slice(&self.1[0..len]))
     } else {
-      let mode = check!(req: Mode::from_u8(comp))?;
+      let mode = check!(req: Mode::try_from(comp))?;
       let full_len = check!(etc: self.0.read_u32_le().await)? as usize;
-      let uncompressed = check!(req: read(&mut self.0, len, full_len, mode).await)?;
+      let uncompressed = check!(req: read_to_bytes(&mut self.0, len, full_len, mode).await)?;
       check!(req: from_slice(&uncompressed))
     }
   }

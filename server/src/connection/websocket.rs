@@ -40,6 +40,7 @@ impl<S: RawStream> Connection for WebSocketConnection<S> {
     match self.0.next().await {
       None => Err(Closed.into()),
       Some(msg) => match msg.map_err(Error::from)? {
+        // SAFETY: we wont use s again
         Message::Text(mut s) => check!(req: unsafe { from_str(&mut s, &mut self.1) }),
         Message::Binary(mut b) => check!(req: from_bytes(&mut b, &mut self.1)),
         Message::Close(_) => Err(Closed.into()),

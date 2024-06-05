@@ -61,3 +61,6 @@ impl<T: Debug> Deref for Global<T> {
 pub type Hasher = gxhash::GxBuildHasher;
 #[cfg(not(feature = "gxhash"))]
 pub type Hasher = std::collections::hash_map::RandomState;
+
+pub type SyncHashMap<K, V> = std::collections::HashMap<K, V, Hasher>;
+pub type SyncHashSet<T> = std::collections::HashSet<T, Hasher>;

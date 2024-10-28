@@ -1,10 +1,8 @@
 # Void Protocol Specification
 
+The Void protocol currently uses TCP. Support for UDP may be added in the future.
+
 ## Serialization Format
-
-The underlying structures will be the same regardless of the protocol, but the serialization format will be different.
-
-### TCP
 
 MessagePack is used for serialization, due to fast implementations being available for many languages, and its small size.
 
@@ -15,7 +13,7 @@ MessagePack is used for serialization, due to fast implementations being availab
 | 4                  | uint32 (little-endian) | Size of the uncompressed data. Only sent if compression mode is not 0. |
 | ...                | \[uint8\]              | The (potentially compressed) MessagePack formatted message.            |
 
-#### Compression
+### Compression
 
 At this time, compression is only used in requests.
 
@@ -29,13 +27,6 @@ At this time, compression is only used in requests.
 | 6   | zlib    |
 | 7   | gzip    |
 | 8   | LZW     |
-
-### WebSocket
-
-JSON is used for serialization, due to the fast JSON implementation already available right in the browser, and ease of use.
-The WebSocket server implementation accepts either string or binary messages, but always sends back a string.
-
-Compression is not supported at this time.
 
 ## Custom Types
 

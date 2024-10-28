@@ -75,7 +75,7 @@ where
       // SAFETY: W has static lifetime bound
       let dst = unsafe { transmute::<&mut W, &'static mut W>(dst) };
       let dst = SyncIoBridge::new(dst);
-      spawn_blocking(move || Lz4Writer::new(dst).write_all(&src)).await??;
+      spawn_blocking(move || Lz4Writer::new(dst).auto_finish().write_all(&src)).await??;
     }
     Zstd => ZstdWriterAsync::new(dst).write_all(&src).await?,
     Snappy => SnappyAsync::new(dst).write_all(&src).await?,

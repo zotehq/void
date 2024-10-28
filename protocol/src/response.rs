@@ -37,28 +37,6 @@ pub enum Status {
 
 pub use Status::*;
 
-impl Status {
-  #[cfg(feature = "http")]
-  pub fn to_http(&self) -> http::StatusCode {
-    match *self {
-      Success => http::StatusCode::OK,
-      ConnLimit => http::StatusCode::SERVICE_UNAVAILABLE,
-      BadRequest => http::StatusCode::BAD_REQUEST,
-      ServerError => http::StatusCode::INTERNAL_SERVER_ERROR,
-
-      RequestTooLarge => http::StatusCode::PAYLOAD_TOO_LARGE,
-      ResponseTooLarge => http::StatusCode::NOT_ACCEPTABLE,
-
-      Unauthorized => http::StatusCode::UNAUTHORIZED,
-      PermissionDenied => http::StatusCode::FORBIDDEN,
-
-      AlreadyExists => http::StatusCode::CONFLICT,
-      NoSuchTable | NoSuchKey => http::StatusCode::NOT_FOUND,
-      KeyExpired => http::StatusCode::GONE,
-    }
-  }
-}
-
 impl std::fmt::Display for Status {
   #[inline]
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -105,13 +83,6 @@ pub struct Response {
 }
 
 impl Response {
-  #[cfg(feature = "http")]
-  pub fn to_http(&self) -> http::Result<http::Response<String>> {
-    http::Response::builder()
-      .status(self.status.to_http())
-      .body("".to_owned())
-  }
-
   // OK is common
 
   pub const OK: Self = Self {

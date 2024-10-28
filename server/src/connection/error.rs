@@ -1,7 +1,6 @@
 use crate::BoxError;
 use protocol::*;
 use std::io::{Error as IoError, ErrorKind as IoErrorKind};
-use tokio_tungstenite::tungstenite::Error as WsError;
 
 // KIND
 
@@ -72,19 +71,6 @@ impl From<IoError> for Error {
   }
 }
 
-impl From<WsError> for Error {
-  #[inline]
-  fn from(e: WsError) -> Self {
-    match e {
-      WsError::ConnectionClosed | WsError::AlreadyClosed => Closed.into(),
-      WsError::Io(e) => e.into(),
-      WsError::Capacity(_) => RequestTooLarge.into(),
-      WsError::WriteBufferFull(_) => Error::new(ServerError.into(), e.into()),
-      _ => Error::new(BadRequest.into(), e.into()),
-    }
-  }
-}
-
 impl From<ErrorKind> for Error {
   #[inline]
   fn from(e: ErrorKind) -> Self {
@@ -98,7 +84,10 @@ impl From<ErrorKind> for Error {
 impl From<Status> for Error {
   #[inline]
   fn from(s: Status) -> Self {
-    s.into()
+    Self {
+      kind: ErrorKind::Status(s),
+      reason: None,
+    }
   }
 }
 

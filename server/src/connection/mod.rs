@@ -1,9 +1,5 @@
 mod error;
-mod tcp;
-mod websocket;
 pub use error::*;
-pub use tcp::*;
-pub use websocket::*;
 
 use crate::{config::CONFIG, logger::*, TableValue, DATABASE};
 use protocol::*;
@@ -12,15 +8,65 @@ use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::time::{Duration, SystemTime};
 
 use scc::hash_map::Entry;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, BufReader};
 
-// CONNECTION TRAIT
+use crate::compression::{read::read_to_bytes, Mode};
+use rmp_serde::{from_slice, to_vec};
+use bytes::BytesMut;
 
-#[async_trait::async_trait]
-pub trait Connection: Send + Sync + Unpin + 'static {
-  async fn send(&mut self, res: Response) -> Result<(), Error>;
-  async fn recv(&mut self) -> Result<Request, Error>;
-  async fn close(&mut self) -> Result<(), Error>;
+// CONNECTION STRUCT
+
+pub struct Connection<S: RawStream>(BufReader<S>, BytesMut);
+
+impl<S: RawStream> From<S> for Connection<S> {
+  #[inline(always)] // we only call this once, always inline
+  fn from(stream: S) -> Self {
+    // add an extra 4 bytes for uncompressed length size
+    let len = CONFIG.max_message_size + 4;
+    Self(BufReader::new(stream), BytesMut::zeroed(len))
+  }
+}
+
+impl<S: RawStream> Connection<S> {
+  #[inline]
+  pub async fn send(&mut self, res: Response) -> Result<(), Error> {
+    let msg = check!(srv: to_vec(&res))?;
+    if msg.len() > CONFIG.max_message_size {
+      return Err(ResponseTooLarge.into());
+    }
+    // PERF: for some reason this is the fastest way to do this
+    let bytes = [
+      &(msg.len() as u32).to_le_bytes(),
+      [0].as_slice(), // TODO: compression
+      msg.as_slice(),
+    ]
+    .concat();
+    check!(etc: self.0.write_all(&bytes).await)
+  }
+
+  #[inline]
+  pub async fn recv(&mut self) -> Result<Request, Error> {
+    let len = check!(etc: self.0.read_u32_le().await)? as usize;
+    if len > CONFIG.max_message_size {
+      return Err(RequestTooLarge.into());
+    }
+
+    let comp = check!(etc: self.0.read_u8().await)?;
+    if comp == 0 {
+      check!(etc: self.0.read_exact(&mut self.1[0..len]).await)?;
+      check!(req: from_slice(&self.1[0..len]))
+    } else {
+      let mode = check!(req: Mode::try_from(comp))?;
+      let full_len = check!(etc: self.0.read_u32_le().await)? as usize;
+      let uncompressed = check!(req: read_to_bytes(&mut self.0, full_len, mode).await)?;
+      check!(req: from_slice(&uncompressed))
+    }
+  }
+
+  #[inline]
+  pub async fn close(&mut self) -> Result<(), Error> {
+    self.0.shutdown().await.map_err(|_| Closed.into())
+  }
 }
 
 pub trait RawStream: AsyncRead + AsyncWrite + Send + Sync + Unpin + 'static {}
@@ -58,7 +104,7 @@ macro_rules! send {
 }
 
 #[inline(always)] // we only call this once, always inline
-pub async fn handle_conn(conn: &mut dyn Connection) {
+pub async fn handle_conn<S: RawStream>(conn: &mut Connection<S>) {
   CURRENT_CONNS.fetch_add(1, SeqCst);
   info!("Connection established {}", fmt_conns());
 

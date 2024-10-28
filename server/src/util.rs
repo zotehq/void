@@ -55,6 +55,12 @@ impl<T: Debug> Deref for Global<T> {
   }
 }
 
+impl<T: Debug> Default for Global<T> {
+  fn default() -> Self {
+      Global::new()
+  }
+}
+
 // HASHER
 
 #[cfg(feature = "gxhash")]

@@ -6,14 +6,10 @@ edition = "2021"
 [dependencies]
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_variant = "0.1"
-http = { version = "1.1", optional = true }
 scc = { version = "2.1", features = ["serde"], optional = true }
 
 [features]
-default = ["http"]
+default = []
 # optionally use concurrent/async scc::HashMap
 # used in the server implementation
 scc = ["dep:scc"]
-# optionally support conversion to HTTP messages
-# used in the server implementation
-http = ["dep:http"]

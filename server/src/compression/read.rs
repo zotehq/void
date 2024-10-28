@@ -20,9 +20,11 @@ use tokio_snappy::SnappyIO as SnappyAsync;
 
 use bytes::{Bytes, BytesMut};
 use std::io::{Cursor, Read};
+use std::mem::transmute;
 use tokio::io::{AsyncBufRead, AsyncReadExt};
 use tokio::task::spawn_blocking;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
+use tokio_util::io::SyncIoBridge;
 
 // BYTES -> BYTES
 
@@ -51,19 +53,20 @@ fn bytes_to_bytes_sync(src: Bytes, len: usize, mode: Mode) -> Result<Bytes> {
 
 // READER -> BYTES
 
-pub async fn read_to_bytes<R>(src: &mut R, len: usize, full: usize, mode: Mode) -> Result<Bytes>
+pub async fn read_to_bytes<R>(src: &mut R, full: usize, mode: Mode) -> Result<Bytes>
 where
-  R: AsyncBufRead + Unpin,
+  R: AsyncBufRead + Send + Sync + Unpin + 'static,
 {
   let mut out = BytesMut::zeroed(full);
 
   match mode {
     Lz4 => {
-      let mut src_out = vec![0; len];
-      src.read_exact(&mut src_out).await?;
+      // SAFETY: R has static lifetime bound
+      let src = unsafe { transmute::<&mut R, &'static mut R>(src) };
+      let src = SyncIoBridge::new(src);
       // Return here because out gets moved.
       return spawn_blocking(move || -> Result<Bytes> {
-        Lz4Reader::new(&*src_out).read_exact(&mut out)?;
+        Lz4Reader::new(src).read_exact(&mut out)?;
         Ok(out.freeze())
       })
       .await?;

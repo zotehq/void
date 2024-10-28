@@ -17,8 +17,7 @@ pub struct TlsConfig {
 
 #[derive(Deserialize, Serialize, Debug)]
 pub struct Config {
-  pub tcp: ConnectionConfig,
-  pub ws: ConnectionConfig,
+  pub conn: ConnectionConfig,
   pub tls: Option<TlsConfig>,
   pub autosave_interval: u64,
   pub username: String,
@@ -26,23 +25,17 @@ pub struct Config {
   pub max_conns: usize,
   pub max_message_size: usize,
   pub compress_threshold: usize,
-  #[cfg(feature = "sentry")]
-  pub sentry_url: Option<String>,
+  //#[cfg(feature = "sentry")]
+  //pub sentry_url: Option<String>,
 }
 
 impl Default for Config {
   fn default() -> Self {
     Self {
-      tcp: ConnectionConfig {
+      conn: ConnectionConfig {
         enabled: true,
         address: "0.0.0.0".to_owned(),
         port: 6380,
-        tls: false,
-      },
-      ws: ConnectionConfig {
-        enabled: false,
-        address: "0.0.0.0".to_owned(),
-        port: 6381,
         tls: false,
       },
       tls: Some(TlsConfig::default()),
@@ -52,8 +45,8 @@ impl Default for Config {
       max_conns: 10000,
       max_message_size: 8 * 1024 * 1024,
       compress_threshold: 128 * 1204,
-      #[cfg(feature = "sentry")]
-      sentry_url: None,
+      //#[cfg(feature = "sentry")]
+      //sentry_url: None,
     }
   }
 }
